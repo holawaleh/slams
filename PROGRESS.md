@@ -89,6 +89,43 @@ has not been run yet. This is the next thing to settle.
 
 ---
 
+## Unresolved — separate from the feature list
+
+Reading back over the project, here's what I'd flag as genuinely unresolved — separate from the feature list below, which is just work remaining.
+
+### Things that could invalidate the design
+
+**The upload bug is unexplained.** We know records queue and never send. We don't know why. It could be trivial (a peek returning nothing) or structural (the circular log's tail pointer being wrong after init). Until it's diagnosed, the offline-first claim is unproven — the device stores correctly but has never demonstrated it can drain.
+
+**The 7-byte UID path has never executed.** Every card tapped so far is 4-byte MIFARE Classic. The cascade logic in the driver is written but unrun. If the institution issues NTAG or Ultralight cards, that code is the first thing that will break, and it would surface during deployment rather than now.
+
+**No load test.** One student tapping slowly is not a lecture hall. Twenty students in thirty seconds exercises the UI queue, the store queue, the upload batching and the LCD interrupt logic simultaneously — none of which have been tested under pressure.
+
+**A full offline lecture has never been simulated.** Disconnect the device, take a hundred taps, reconnect, verify every record arrives exactly once. That's the scenario the whole architecture exists for, and it's untested.
+
+### Things decided but never revisited
+
+**The clock problem.** The plan was to derive time from the last sync plus uptime, with a confidence flag. Never settled: whether flagged-but-unverified records are acceptable to the institution, or whether a lecturer needs to confirm them. That affects the dashboard design.
+
+**Session ownership.** Both timetable-created and lecturer-opened sessions were meant to exist. Only the timetable half is built. The lecturer-card path — which handles reschedules, the most common real-world case — doesn't exist.
+
+**Enrolment mode.** Two mechanisms were designed (admin card, server flag). Neither is implemented. The dashboard side now exists, so this is unblocked.
+
+### Things that went wrong along the way
+
+Worth naming, since they're the kind of error that recurs:
+
+- 400 kHz was assumed for the I2C display; the PCF8574 is rated for 100 kHz. Corrected, but should have been checked first.
+- LittleFS was used for the event queue — wrong tool. A filesystem commits metadata on every close, and flash warnings showed up within minutes.
+- Sample data was invented (`ADEYEMI H.`) without clearly flagging it as fake, and it was reasonable to assume it came from somewhere real.
+- Several code blocks silently failed to apply, costing time debugging symptoms rather than checking whether the file had been written. `check-files.ps1` exists now; it should be extended as new files are added.
+
+### The one thing to do before anything else
+
+Not the upload bug — the **offline lecture test**. It exercises the queue, the drain, the timestamps and the deduplication in one go, and it's the scenario that decides whether this system is trustworthy. The upload bug will surface during it anyway.
+
+---
+
 ## Remaining
 
 ### Firmware
@@ -164,7 +201,7 @@ Three terminals:
 
 | Folder | Command |
 |---|---|
-| `idf_folder/slam` | `idf.py build` then `idf.py -p COM? flash monitor` |
+| `C:\CodeSet\idf_folder\slam` (separate location, not in this repo) | `idf.py build` then `idf.py -p COM? flash monitor` |
 | `slams/backend` | `python manage.py runserver 0.0.0.0:8000` |
 | `slams/frontend` | `npm run dev` |
 

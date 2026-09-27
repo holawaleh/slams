@@ -47,18 +47,28 @@ class StudentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     def attendance(self, request, pk=None):
         """Attendance percentage per course for one student."""
         student = self.get_object()
-        rows = (AttendanceRecord.objects
+        rows = list(AttendanceRecord.objects
                 .filter(student=student)
                 .values("session__course__code")
                 .annotate(attended=Count("id"),
                           present=Count("id", filter=Q(status="present")),
                           late=Count("id", filter=Q(status="late")))
                 .order_by("session__course__code"))
+
+        # One query for every course's held-session count, instead of one
+        # query per row - this used to be an N+1 as the course list grew.
+        codes = [r["session__course__code"] for r in rows]
+        held_map = dict(ClassSession.objects
+                         .filter(org=self.org, course__code__in=codes,
+                                 status="closed")
+                         .values("course__code")
+                         .annotate(held=Count("id"))
+                         .values_list("course__code", "held"))
+
         out = []
         for r in rows:
             code = r["session__course__code"]
-            held = ClassSession.objects.filter(
-                org=self.org, course__code=code, status="closed").count()
+            held = held_map.get(code, 0)
             out.append({
                 "course": code, "sessions_held": held,
                 "attended": r["attended"], "present": r["present"],
