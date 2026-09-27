@@ -1,0 +1,37 @@
+﻿.landing{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:40px 20px;
+}
+.landing-inner{text-align:center;max-width:900px}
+
+.landing-cap{
+  width:84px;
+  height:84px;
+  color:var(--accent);
+  margin-bottom:24px;
+}
+
+.landing h1{
+  font-size:clamp(28px,6vw,64px);
+  font-weight:700;
+  letter-spacing:-.02em;
+  line-height:1.08;
+  margin-bottom:16px;
+}
+
+.landing-sub{
+  font-size:clamp(15px,2vw,19px);
+  color:var(--ink-dim);
+  margin:0 0 32px;
+}
+
+.landing-btn{
+  font-size:17px;
+  padding:15px 40px;
+  min-width:min(420px,90vw);
+}
+
+.landing-note{margin-top:22px;font-size:14px}

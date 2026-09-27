@@ -1,0 +1,187 @@
+from rest_framework import serializers
+from .base_serializers import TenantSerializer
+from django.contrib.auth.models import User
+from .models import (Student, Card, Venue, Course, Enrollment, Device,
+                     TimetableSlot, ClassSession, TapEvent,
+                     AttendanceRecord, AuditLog)
+
+
+class UserBriefSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ("id", "username", "first_name", "last_name")
+
+
+class CardBriefSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Card
+        fields = ("id", "uid", "active", "is_admin", "issued_at")
+
+
+class StudentSerializer(TenantSerializer):
+    cards = CardBriefSerializer(many=True, read_only=True)
+    full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Student
+        fields = ("id", "matric_no", "first_name", "last_name", "full_name",
+                  "short_name", "department", "level", "active",
+                  "created_at", "cards")
+        read_only_fields = ("created_at",)
+
+    def get_full_name(self, obj):
+        return f"{obj.first_name} {obj.last_name}"
+
+    def validate_matric_no(self, value):
+        return value.strip().upper()
+
+
+class CardSerializer(TenantSerializer):
+    student_name = serializers.CharField(source="student.short_name",
+                                         read_only=True)
+
+    class Meta:
+        model = Card
+        fields = ("id", "uid", "student", "student_name", "holder",
+                  "is_admin", "active", "issued_at", "revoked_at")
+        read_only_fields = ("issued_at", "revoked_at")
+
+    def validate_uid(self, value):
+        uid = value.strip().upper().replace(":", "").replace(" ", "")
+        if not all(c in "0123456789ABCDEF" for c in uid):
+            raise serializers.ValidationError("UID must be hexadecimal.")
+        if len(uid) not in (8, 14, 20):
+            raise serializers.ValidationError(
+                "UID must be 8, 14 or 20 hex characters (4, 7 or 10 bytes).")
+        return uid
+
+
+class VenueSerializer(TenantSerializer):
+    class Meta:
+        model = Venue
+        fields = ("id", "code", "name", "capacity")
+
+
+class CourseSerializer(TenantSerializer):
+    lecturer_name    = serializers.CharField(source="lecturer.get_full_name",
+                                             read_only=True)
+    enrolled_count   = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Course
+        fields = ("id", "code", "title", "lecturer", "lecturer_name",
+                  "enrolled_count")
+
+
+class EnrollmentSerializer(TenantSerializer):
+    student_name = serializers.CharField(source="student.short_name",
+                                         read_only=True)
+    course_code  = serializers.CharField(source="course.code", read_only=True)
+
+    class Meta:
+        model = Enrollment
+        fields = ("id", "student", "student_name", "course", "course_code", "term")
+
+
+class DeviceSerializer(TenantSerializer):
+    venue_code = serializers.CharField(source="venue.code", read_only=True)
+    online     = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Device
+        # token is deliberately absent. It is revealed once, through a
+        # dedicated action, so it never appears in a list response.
+        fields = ("id", "name", "venue", "venue_code", "enroll_mode",
+                  "active", "last_seen", "firmware", "queue_depth", "online")
+        read_only_fields = ("last_seen", "firmware", "queue_depth")
+
+    def get_online(self, obj):
+        from django.utils import timezone
+        from datetime import timedelta
+        if not obj.last_seen:
+            return False
+        return obj.last_seen > timezone.now() - timedelta(minutes=5)
+
+
+class TimetableSlotSerializer(TenantSerializer):
+    course_code = serializers.CharField(source="course.code", read_only=True)
+    venue_code  = serializers.CharField(source="venue.code", read_only=True)
+    weekday_name = serializers.CharField(source="get_weekday_display",
+                                         read_only=True)
+
+    class Meta:
+        model = TimetableSlot
+        fields = ("id", "course", "course_code", "venue", "venue_code",
+                  "weekday", "weekday_name", "start_time", "end_time",
+                  "grace_minutes", "term", "active")
+
+    def validate(self, data):
+        start = data.get("start_time")
+        end   = data.get("end_time")
+        if start and end and end <= start:
+            raise serializers.ValidationError(
+                {"end_time": "End time must be after the start time."})
+        return data
+
+
+class ClassSessionSerializer(TenantSerializer):
+    course_code  = serializers.CharField(source="course.code", read_only=True)
+    venue_code   = serializers.CharField(source="venue.code", read_only=True)
+    present_count = serializers.IntegerField(read_only=True)
+    late_count    = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = ClassSession
+        fields = ("id", "slot", "course", "course_code", "venue", "venue_code",
+                  "starts_at", "ends_at", "grace_minutes", "status",
+                  "opened_by", "roster_version",
+                  "present_count", "late_count")
+        read_only_fields = ("opened_by", "roster_version")
+
+
+class TapEventSerializer(TenantSerializer):
+    device_name  = serializers.CharField(source="device.name", read_only=True)
+    student_name = serializers.CharField(source="student.short_name",
+                                         read_only=True)
+
+    class Meta:
+        model = TapEvent
+        fields = ("id", "device", "device_name", "uid", "student",
+                  "student_name", "session", "outcome", "tapped_at",
+                  "time_conf", "client_id", "received_at")
+        read_only_fields = fields          # the raw log is never edited
+
+
+class AttendanceRecordSerializer(TenantSerializer):
+    student_name = serializers.CharField(source="student.short_name",
+                                         read_only=True)
+    matric_no    = serializers.CharField(source="student.matric_no",
+                                         read_only=True)
+    course_code  = serializers.CharField(source="session.course.code",
+                                         read_only=True)
+
+    class Meta:
+        model = AttendanceRecord
+        fields = ("id", "session", "course_code", "student", "student_name",
+                  "matric_no", "status", "tapped_at", "device", "verified")
+
+
+class AuditLogSerializer(TenantSerializer):
+    actor_name = serializers.CharField(source="actor.username", read_only=True)
+
+    class Meta:
+        model = AuditLog
+        fields = ("id", "actor", "actor_name", "action", "detail",
+                  "ip", "created_at")
+        read_only_fields = fields
+
+
+class BindCardSerializer(serializers.Serializer):
+    """Binding a UID to a student is the fraud-sensitive operation, so it
+    gets its own endpoint and is always written to the audit log."""
+    uid        = serializers.CharField(max_length=20)
+    student_id = serializers.IntegerField()
+    replace    = serializers.BooleanField(
+        default=False,
+        help_text="Revoke the student's existing cards first")
+
