@@ -10,7 +10,10 @@ load_dotenv(BASE_DIR / ".env", override=False)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only")
 DEBUG = os.getenv("DEBUG", "0") == "1"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+# Trim each entry: a space after a comma in the hosting dashboard would
+# otherwise produce a host name that can never match.
+ALLOWED_HOSTS = [h.strip() for h in
+                 os.getenv("ALLOWED_HOSTS", "*").split(",") if h.strip()]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -64,9 +67,6 @@ else:
         "NAME": BASE_DIR / "db.sqlite3",
     }}
 
-import sys
-print(f"[settings] DEBUG={DEBUG} ALLOWED_HOSTS={ALLOWED_HOSTS}", file=sys.stderr)
-
 AUTHENTICATION_BACKENDS = [
     "core.auth_backends.CaseInsensitiveUsernameBackend",
     "django.contrib.auth.backends.ModelBackend",
@@ -94,7 +94,11 @@ REST_FRAMEWORK = {
     ],
 }
 
+# In production, name the frontend explicitly. Allowing every origin
+# would let any website make authenticated requests as a logged-in user.
 CORS_ALLOW_ALL_ORIGINS = DEBUG
+CORS_ALLOWED_ORIGINS = [o.strip() for o in
+                        os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 
 # Custom headers must be listed, even with all origins allowed - the
 # browser preflight rejects anything not named here.
@@ -116,11 +120,6 @@ STORAGES = {
 }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-
-
-
-
-
-
-
-
+import sys
+print(f"[settings] DEBUG={DEBUG} HOSTS={ALLOWED_HOSTS} "
+      f"CORS={CORS_ALLOWED_ORIGINS}", file=sys.stderr)
