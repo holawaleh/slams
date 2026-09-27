@@ -90,6 +90,11 @@ REST_FRAMEWORK = {
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 
+# Custom headers must be listed, even with all origins allowed - the
+# browser preflight rejects anything not named here.
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + ["x-org"]
+
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"          # store UTC, convert for display only
 USE_I18N = True
@@ -97,6 +102,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
 
 
 

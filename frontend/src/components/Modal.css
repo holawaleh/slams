@@ -1,0 +1,16 @@
+﻿.modal-scrim{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,.6);
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;
+  z-index:80;
+}
+.modal{
+  width:100%;
+  max-height:88vh;
+  overflow-y:auto;
+  box-shadow:var(--shadow);
+  padding:22px;
+}
+.modal-head{margin-bottom:18px}
+.modal-x{padding:6px 8px;border:0}

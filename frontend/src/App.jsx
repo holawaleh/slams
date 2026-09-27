@@ -1,25 +1,25 @@
 ﻿import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
+import Layout from "./components/Layout";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import Overview from "./pages/Overview";
+import UnknownCards from "./pages/UnknownCards";
 import "./theme.css";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="center muted" style={{ padding: 60 }}>Loading...</div>;
+  if (loading)
+    return <div className="center muted" style={{ padding: 60 }}>Loading...</div>;
   return user ? children : <Navigate to="/login" replace />;
 }
 
-function Placeholder() {
-  const { user, org, logout } = useAuth();
+function Soon({ title }) {
   return (
-    <div style={{ padding: 40 }}>
-      <h2>Signed in</h2>
-      <p className="muted">
-        {user?.username} at {org?.name} ({org?.role})
-      </p>
-      <button className="btn-ghost" onClick={logout}>Sign out</button>
-    </div>
+    <>
+      <h2>{title}</h2>
+      <p className="muted">Not built yet.</p>
+    </>
   );
 }
 
@@ -31,7 +31,21 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/dashboard" element={<Protected><Placeholder /></Protected>} />
+
+          <Route element={<Protected><Layout /></Protected>}>
+            <Route path="/dashboard"  element={<Overview />} />
+            <Route path="/students"   element={<Soon title="Students" />} />
+            <Route path="/cards"      element={<Soon title="Cards" />} />
+            <Route path="/unknown"    element={<UnknownCards />} />
+            <Route path="/courses"    element={<Soon title="Courses" />} />
+            <Route path="/timetable"  element={<Soon title="Timetable" />} />
+            <Route path="/sessions"   element={<Soon title="Lectures" />} />
+            <Route path="/attendance" element={<Soon title="Attendance" />} />
+            <Route path="/devices"    element={<Soon title="Devices" />} />
+            <Route path="/members"    element={<Soon title="Team" />} />
+            <Route path="/settings"   element={<Soon title="Settings" />} />
+          </Route>
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
