@@ -4,7 +4,9 @@ import dj_database_url
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+# override=False so real environment variables (Render, Docker) always
+# beat anything in a .env file that may have been committed by mistake.
+load_dotenv(BASE_DIR / ".env", override=False)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only")
 DEBUG = os.getenv("DEBUG", "0") == "1"
@@ -62,6 +64,9 @@ else:
         "NAME": BASE_DIR / "db.sqlite3",
     }}
 
+import sys
+print(f"[settings] DEBUG={DEBUG} ALLOWED_HOSTS={ALLOWED_HOSTS}", file=sys.stderr)
+
 AUTHENTICATION_BACKENDS = [
     "core.auth_backends.CaseInsensitiveUsernameBackend",
     "django.contrib.auth.backends.ModelBackend",
@@ -110,6 +115,8 @@ STORAGES = {
     },
 }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
 
 
 
