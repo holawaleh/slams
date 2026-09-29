@@ -1,5 +1,21 @@
 from rest_framework import permissions, exceptions
-from .tenancy import Membership
+from .tenancy import Membership, Organization
+
+
+def _platform_membership(request):
+    """A superuser is the platform operator: owner-level access to any
+    active org, chosen with X-Org. The Membership is unsaved, so it never
+    appears in an org's member list."""
+    orgs = Organization.objects.filter(active=True).order_by("name")
+    slug = request.headers.get("X-Org")
+    org = orgs.filter(slug=slug).first() if slug else None
+    if org is None:
+        real = Membership.objects.select_related("org").filter(
+            user=request.user, org__active=True, is_default=True).first()
+        org = real.org if real else orgs.first()
+    if org is None:
+        return None
+    return Membership(user=request.user, org=org, role=Membership.OWNER)
 
 
 def get_membership(request):
@@ -14,11 +30,14 @@ def get_membership(request):
     if cached is not None:
         return cached
 
-    qs = Membership.objects.select_related("org").filter(
-        user=request.user, org__active=True)
-    slug = request.headers.get("X-Org")
-    m = qs.filter(org__slug=slug).first() if slug else \
-        (qs.filter(is_default=True).first() or qs.first())
+    if request.user.is_superuser:
+        m = _platform_membership(request)
+    else:
+        qs = Membership.objects.select_related("org").filter(
+            user=request.user, org__active=True)
+        slug = request.headers.get("X-Org")
+        m = qs.filter(org__slug=slug).first() if slug else \
+            (qs.filter(is_default=True).first() or qs.first())
 
     request._membership = m
     return m

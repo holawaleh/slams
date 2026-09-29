@@ -1,6 +1,8 @@
 ﻿import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import api from "../lib/api";
+import ThemeToggle from "./ThemeToggle";
 import "./Layout.css";
 
 const NAV = [
@@ -38,7 +40,7 @@ function Icon({ name }) {
 }
 
 export default function Layout() {
-  const { user, org, orgs, isAdmin, logout } = useAuth();
+  const { user, org, orgs, isAdmin, isPlatformAdmin, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const navigate = useNavigate();
@@ -94,13 +96,17 @@ export default function Layout() {
 
           <div className="grow" />
 
+          <ThemeToggle />
+
           <div className="account">
             <button className="btn-ghost account-btn"
                     onClick={() => setMenu(!menu)}>
               <span className="avatar">{initials}</span>
               <span className="account-name">
                 {user?.username}
-                <small className="faint">{org?.role}</small>
+                <small className="faint">
+                  {isPlatformAdmin ? "platform admin" : org?.role}
+                </small>
               </span>
             </button>
 
@@ -128,6 +134,12 @@ export default function Layout() {
                           onClick={() => { setMenu(false); navigate("/settings"); }}>
                     Settings
                   </button>
+                  {isPlatformAdmin && (
+                    <a className="menu-item" target="_blank" rel="noreferrer"
+                       href={`${api.defaults.baseURL}/admin/`}>
+                      All users &amp; data (Django admin)
+                    </a>
+                  )}
                   <button className="menu-item danger" onClick={logout}>
                     Sign out
                   </button>

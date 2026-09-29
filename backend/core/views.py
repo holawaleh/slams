@@ -1,4 +1,4 @@
-from django.db.models import Count, Q, Max
+from django.db.models import Count, Q, Max, ProtectedError
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -23,6 +23,18 @@ def client_ip(request):
     return fwd.split(",")[0].strip() if fwd else request.META.get("REMOTE_ADDR")
 
 
+def destroy_or_conflict(view, request, what):
+    """Delete, or explain why not. Rows with attendance history are
+    protected, and a raw ProtectedError would surface as a 500."""
+    try:
+        return viewsets.ModelViewSet.destroy(view, request)
+    except ProtectedError:
+        return Response(
+            {"detail": f"This {what} has attendance history and cannot be "
+                       f"deleted."},
+            status=status.HTTP_409_CONFLICT)
+
+
 def audit(request, action_name, detail):
     m = get_membership(request)
     if m is None:
@@ -42,6 +54,9 @@ class StudentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     search_fields = ["matric_no", "first_name", "last_name"]
     ordering_fields = ["matric_no", "last_name", "created_at"]
     ordering = ["matric_no"]
+
+    def destroy(self, request, *args, **kwargs):
+        return destroy_or_conflict(self, request, "student")
 
     @action(detail=True)
     def attendance(self, request, pk=None):
@@ -158,6 +173,9 @@ class CourseViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     search_fields = ["code", "title"]
     ordering = ["code"]
 
+    def destroy(self, request, *args, **kwargs):
+        return destroy_or_conflict(self, request, "course")
+
     @action(detail=True)
     def roster(self, request, pk=None):
         course = self.get_object()
@@ -171,16 +189,20 @@ class CourseViewSet(TenantScopedMixin, viewsets.ModelViewSet):
 class EnrollmentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     queryset = Enrollment.objects.select_related("student", "course").all()
     serializer_class = EnrollmentSerializer
-    permission_classes = [IsOrgAdmin]
+    # Lecturers need to see who is on their course; only admins change it.
+    permission_classes = [IsOrgAdminOrReadOnly]
     pagination_class = LargePagination
     filterset_fields = ["course", "student", "term"]
+    search_fields = ["student__matric_no", "student__first_name",
+                     "student__last_name"]
+    ordering = ["student__matric_no"]
 
     @action(detail=False, methods=["post"])
     def bulk(self, request):
         """Enrol many students onto one course in a single query."""
         course_id = request.data.get("course")
         ids = request.data.get("student_ids", [])
-        term = request.data.get("term", "2025/2026-1")
+        term = request.data.get("term") or self.org.term
         if not course_id or not isinstance(ids, list):
             return Response({"detail": "course and student_ids are required."},
                             status=status.HTTP_400_BAD_REQUEST)

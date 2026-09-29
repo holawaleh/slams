@@ -1,12 +1,13 @@
 ﻿import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import PasswordInput from "../components/PasswordInput";
+import ThemeToggle from "../components/ThemeToggle";
 import "./Login.css";
 
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [show, setShow] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const { login } = useAuth();
@@ -17,7 +18,12 @@ export default function Login() {
     setError("");
     setBusy(true);
     try {
-      await login(username.trim(), password);
+      const me = await login(username.trim(), password);
+      if (!me.current_org && !me.user.is_platform_admin) {
+        setError("This account is not a member of any institution. " +
+                 "Create an account, or ask an admin to invite you.");
+        return;
+      }
       navigate("/dashboard");
     } catch (err) {
       // Neon wakes from idle slowly, so a timeout here is not the same
@@ -36,6 +42,7 @@ export default function Login() {
 
   return (
     <div className="auth-page">
+      <ThemeToggle floating />
       <div className="auth-card card">
         <div className="auth-logo">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -71,28 +78,9 @@ export default function Login() {
 
           <div className="field">
             <label htmlFor="p">Password</label>
-            <div className="input-group">
-              <span className="input-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                     stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-              </span>
-              <input id="p" type={show ? "text" : "password"} value={password}
-                     autoComplete="current-password"
-                     onChange={(e) => setPassword(e.target.value)} required />
-              <button type="button" className="reveal"
-                      onClick={() => setShow(!show)}
-                      aria-label={show ? "Hide password" : "Show password"}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                     stroke="currentColor" strokeWidth="2">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
-                  <circle cx="12" cy="12" r="3" />
-                  {show && <line x1="3" y1="21" x2="21" y2="3" />}
-                </svg>
-              </button>
-            </div>
+            <PasswordInput id="p" value={password} required
+                           autoComplete="current-password"
+                           onChange={(e) => setPassword(e.target.value)} />
           </div>
 
           <button type="submit" className="btn-solid btn-full" disabled={busy}>

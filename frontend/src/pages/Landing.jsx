@@ -1,9 +1,11 @@
 ﻿import { Link } from "react-router-dom";
+import ThemeToggle from "../components/ThemeToggle";
 import "./Landing.css";
 
 export default function Landing() {
   return (
     <div className="landing">
+      <ThemeToggle floating />
       <div className="landing-inner">
         <svg className="landing-cap" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 3 1 9l11 6 9-4.91V17h2V9M5 13.18v4L12 21l7-3.82v-4L12 17z" />
@@ -21,7 +23,9 @@ export default function Landing() {
           </svg>
           Login to Dashboard
         </Link>
-        <p className="faint landing-note">Authorized personnel only</p>
+        <p className="faint landing-note">
+          New school? <Link to="/register">Create an account</Link>
+        </p>
       </div>
     </div>
   );

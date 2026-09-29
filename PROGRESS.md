@@ -77,15 +77,34 @@ Live: `https://slams-bez9.onrender.com` and `https://slams-chi.vercel.app`
 - [x] Dashboard shell: sidebar, org switcher, role-aware nav
 - [x] Overview page with live counts
 - [x] New cards worklist — bind a seen UID to a student
+- [x] Students: search, add, edit, deactivate, per-course attendance
+- [x] Courses: add, edit, lecturer, roster, bulk enrolment
+
+### Timing (server-authoritative)
+- [x] Device clock synced from the backend in ms, half the round trip allowed for
+- [x] Taps carry boot id + uptime; upload sends `age_ms`, server rebuilds the time
+- [x] Server re-judges every tap against session start/end in the org timezone
+- [x] Taps outside the window are stored but never become attendance
+- [x] Device's own verdict kept as `device_outcome`, for the beep only
 
 ---
 
 ## Open bug
 
 **Uploads never fire.** Records queue correctly (depth climbs, survives
-reboot) but no `POST /api/device/attendance/` reaches the server.
-Diagnostic logging was added to `slam_api_upload` and the net task but
-has not been run yet. This is the next thing to settle.
+reboot) but no attendance reaches the server. Three causes found and
+fixed, not yet confirmed on hardware:
+
+- The upload view called `timezone.utc`, which Django 5+ removed. Any
+  record with a real timestamp raised a 500.
+- `client_id` restarted at 1 every boot, so after a reboot new taps
+  collided with old ones and `ignore_conflicts` dropped them silently.
+  The wire id is now `(boot_id << 32) | counter`.
+- If the queue reports pending records but peek finds none, the device
+  now logs it instead of returning silently.
+
+The flash queue layout changed (v2), so records queued by older
+firmware are discarded on first boot.
 
 ---
 
@@ -142,7 +161,7 @@ Not the upload bug — the **offline lecture test**. It exercises the queue, the
 - [ ] Attendance summary table (avoid recomputing percentages per request)
 
 ### Frontend
-- [ ] Students, cards, courses, enrolment
+- [ ] Cards
 - [ ] Timetable and venues
 - [ ] Device management, token reveal
 - [ ] Live lecture view (polls with a `since` cursor)

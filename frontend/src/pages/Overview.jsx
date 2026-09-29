@@ -1,7 +1,8 @@
 ﻿import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../lib/api";
-import { PageHead, Loading, ErrorBox } from "../components/bits";
+import { useAuth } from "../lib/auth";
+import { PageHead, Loading, ErrorBox, Empty } from "../components/bits";
 
 function Stat({ label, value, to, tone }) {
   const body = (
@@ -18,10 +19,12 @@ function Stat({ label, value, to, tone }) {
 }
 
 export default function Overview() {
+  const { org } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!org) return;
     Promise.all([
       api.get("/api/organization/"),
       api.get("/api/devices/"),
@@ -39,8 +42,16 @@ export default function Overview() {
         });
       })
       .catch(setError);
-  }, []);
+  }, [org]);
 
+  if (!org)
+    return (
+      <>
+        <PageHead title="Overview" />
+        <Empty message="No schools registered yet."
+               hint="Once a school signs up, it appears in the account menu." />
+      </>
+    );
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading what="overview" />;
 

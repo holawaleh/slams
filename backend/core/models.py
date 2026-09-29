@@ -170,7 +170,11 @@ class TapEvent(TenantModel):
                                     on_delete=models.SET_NULL)
     session     = models.ForeignKey(ClassSession, null=True, blank=True,
                                     on_delete=models.SET_NULL)
-    outcome     = models.CharField(max_length=16)
+    # outcome is the server's verdict, judged against the timetable.
+    # device_outcome is what the reader showed the student at the time,
+    # kept so a disagreement between the two can be investigated.
+    outcome        = models.CharField(max_length=16)
+    device_outcome = models.CharField(max_length=16, blank=True)
     tapped_at   = models.DateTimeField()
     time_conf   = models.CharField(max_length=8, default="synced")
     client_id   = models.BigIntegerField()

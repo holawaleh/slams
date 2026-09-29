@@ -1,10 +1,13 @@
-﻿import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import Register from "./pages/Register";
 import Overview from "./pages/Overview";
 import UnknownCards from "./pages/UnknownCards";
+import Students from "./pages/Students";
+import Courses, { CourseDetail } from "./pages/Courses";
 import "./theme.css";
 
 function Protected({ children }) {
@@ -31,13 +34,15 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
 
           <Route element={<Protected><Layout /></Protected>}>
             <Route path="/dashboard"  element={<Overview />} />
-            <Route path="/students"   element={<Soon title="Students" />} />
+            <Route path="/students"   element={<Students />} />
             <Route path="/cards"      element={<Soon title="Cards" />} />
             <Route path="/unknown"    element={<UnknownCards />} />
-            <Route path="/courses"    element={<Soon title="Courses" />} />
+            <Route path="/courses"    element={<Courses />} />
+            <Route path="/courses/:id" element={<CourseDetail />} />
             <Route path="/timetable"  element={<Soon title="Timetable" />} />
             <Route path="/sessions"   element={<Soon title="Lectures" />} />
             <Route path="/attendance" element={<Soon title="Attendance" />} />

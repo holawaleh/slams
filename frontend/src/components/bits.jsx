@@ -1,4 +1,4 @@
-﻿export function PageHead({ title, subtitle, children }) {
+export function PageHead({ title, subtitle, children }) {
   return (
     <div className="spread" style={{ marginBottom: 22, flexWrap: "wrap" }}>
       <div>
@@ -31,10 +31,23 @@ export function Empty({ message, hint }) {
   );
 }
 
+export function errorText(error) {
+  if (!error) return "";
+  if (!error.response) return "Could not reach the server.";
+  const data = error.response.data;
+  if (data?.detail) return data.detail;
+  // DRF validation errors arrive as { field: ["message", ...] }.
+  if (data && typeof data === "object") {
+    const parts = Object.entries(data).map(([k, v]) => {
+      const msg = Array.isArray(v) ? v.join(" ") : String(v);
+      return k === "non_field_errors" ? msg : `${k.replace(/_/g, " ")}: ${msg}`;
+    });
+    if (parts.length) return parts.join(" ");
+  }
+  return `Request failed (${error.response.status}).`;
+}
+
 export function ErrorBox({ error }) {
   if (!error) return null;
-  const msg = !error.response
-    ? "Could not reach the server."
-    : error.response.data?.detail || `Request failed (${error.response.status}).`;
-  return <div className="alert alert-bad">{msg}</div>;
+  return <div className="alert alert-bad">{errorText(error)}</div>;
 }

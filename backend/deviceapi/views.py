@@ -5,14 +5,19 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.models import (Card, Student, Device, TapEvent, AttendanceRecord,
-                         ClassSession)
+from datetime import datetime, timedelta, timezone as dt_timezone
+
+from core.models import Card, Device, TapEvent, AttendanceRecord
 from .authentication import DeviceTokenAuthentication
 from .permissions import IsDevice
 from .services import (active_session_for, roster_for, bundle_version,
-                       pack_directory)
+                       pack_directory, judge_taps)
 
 FIRMWARE_LATEST = "0.1.0"
+
+
+def server_ms():
+    return int(timezone.now().timestamp() * 1000)
 
 
 class DeviceView(APIView):
@@ -65,6 +70,9 @@ class HelloView(DeviceView):
                 "grace_minutes": session.grace_minutes,
                 "status": session.status,
             }
+        # Stamped last, after the queries above, so the device anchors its
+        # clock to a time as close as possible to when it reads the reply.
+        payload["server_utc_ms"] = server_ms()
         return Response(payload)
 
 
@@ -126,11 +134,39 @@ class DirectoryView(DeviceView):
 class AttendanceUploadView(DeviceView):
     """Batch upload. Each record carries a client id; combined with the
     unique constraint, a retry after a dropped connection can never
-    create a duplicate row."""
+    create a duplicate row.
+
+    The server, not the device, decides whether a tap counts. The device
+    reports what it saw and how long ago; the time is rebuilt from the
+    server's own clock and the tap is judged against the timetable here.
+    A tap outside a session's start and end is stored for the record but
+    never becomes attendance."""
 
     MAX_BATCH = 100
+    TIME_CONF = ("synced", "drift", "unknown")
+
+    def tap_time(self, r, received):
+        """When the tap happened, and how far that can be trusted.
+
+        age_ms is the preferred source: the device measures how long ago
+        the tap was on its own uptime counter, which needs no clock at
+        all, and the server subtracts that from its own time. It is only
+        sent for taps made since the device last booted. Older taps fall
+        back to the device's wall clock, if it had one."""
+        age = r.get("age_ms")
+        if isinstance(age, int) and not isinstance(age, bool) and age >= 0:
+            return received - timedelta(milliseconds=age), "synced"
+
+        ts = r.get("ts_utc")
+        conf = str(r.get("time_conf", "unknown"))
+        if conf not in self.TIME_CONF:
+            conf = "unknown"
+        if isinstance(ts, int) and ts > 0 and conf != "unknown":
+            return datetime.fromtimestamp(ts, tz=dt_timezone.utc), conf
+        return None, "unknown"
 
     def post(self, request):
+        received = timezone.now()
         self.touch(request)
         device = request.device
         records = request.data.get("records")
@@ -142,47 +178,52 @@ class AttendanceUploadView(DeviceView):
                             status=status.HTTP_400_BAD_REQUEST)
 
         results = []
-        accepted_ids = []
-        taps = []
+        pending = []
 
-        # Resolve every UID and session in two queries, not two per record.
-        uids = {str(r.get("uid", "")).upper() for r in records if r.get("uid")}
+        # Only active cards identify a student. A revoked card is still
+        # logged, but it no longer speaks for anyone.
+        uids = {str(r.get("uid", "")).upper() for r in records
+                if isinstance(r, dict) and r.get("uid")}
         cards = {c.uid: c for c in Card.objects.filter(
-            org=device.org, uid__in=uids).select_related("student")}
-        sids = {r.get("session_id") for r in records if r.get("session_id")}
-        sessions = {s.id: s for s in ClassSession.objects.filter(
-            org=device.org, id__in=[s for s in sids if s])}
+            org=device.org, uid__in=uids, active=True).select_related("student")}
 
         for r in records:
+            if not isinstance(r, dict):
+                results.append({"client_id": None, "status": "invalid",
+                                "detail": "record must be an object"})
+                continue
             cid = r.get("client_id")
-            if not isinstance(cid, int):
+            if not isinstance(cid, int) or isinstance(cid, bool) or cid < 0:
                 results.append({"client_id": cid, "status": "invalid",
                                 "detail": "client_id must be an integer"})
                 continue
 
-            uid = str(r.get("uid", "")).upper()
-            outcome = str(r.get("outcome", ""))[:16]
-            ts = r.get("ts_utc")
-            conf = str(r.get("time_conf", "synced"))[:8]
-            sid = r.get("session_id") or None
-
-            if not uid or not outcome or not isinstance(ts, int):
+            uid = str(r.get("uid", "")).upper()[:20]
+            if not uid:
                 results.append({"client_id": cid, "status": "invalid",
-                                "detail": "uid, outcome and ts_utc required"})
+                                "detail": "uid required"})
                 continue
 
-            card = cards.get(uid)
-            session = sessions.get(sid) if sid else None
-            tapped_at = timezone.datetime.fromtimestamp(
-                ts, tz=timezone.utc) if ts > 0 else timezone.now()
+            tapped_at, conf = self.tap_time(r, received)
+            pending.append({
+                "cid": cid, "uid": uid, "card": cards.get(uid),
+                "tapped_at": tapped_at, "conf": conf,
+                "device_outcome": str(r.get("outcome", ""))[:16],
+            })
 
+        verdicts = judge_taps(device, pending)
+        taps = []
+        for p, (outcome, session) in zip(pending, verdicts):
+            card = p["card"]
             taps.append(TapEvent(
-                org=device.org, device=device, uid=uid,
+                org=device.org, device=device, uid=p["uid"],
                 student=card.student if card else None,
                 session=session, outcome=outcome,
-                tapped_at=tapped_at, time_conf=conf, client_id=cid))
-            accepted_ids.append(cid)
-            results.append({"client_id": cid, "status": "accepted"})
+                device_outcome=p["device_outcome"],
+                tapped_at=p["tapped_at"] or received,
+                time_conf=p["conf"], client_id=p["cid"]))
+            results.append({"client_id": p["cid"], "status": "accepted",
+                            "outcome": outcome})
 
         with transaction.atomic():
             # ignore_conflicts makes a replayed batch harmless.
@@ -191,20 +232,21 @@ class AttendanceUploadView(DeviceView):
 
         return Response({
             "received": len(records),
-            "accepted": len(accepted_ids),
+            "accepted": len(taps),
             "server_utc": int(timezone.now().timestamp()),
+            "server_utc_ms": server_ms(),
             "results": results,
         })
 
     def _derive_attendance(self, device, taps):
-        """Turn accepted taps into attendance rows. A tap recorded while
-        the device clock was unreliable is stored but flagged, so a
-        lecturer can confirm it rather than it being silently trusted."""
+        """Turn counted taps into attendance rows. Only judge_taps() can
+        produce present or late, and only for a tap inside a session's
+        window. A tap timed by a drifting device clock is counted but
+        flagged, so a lecturer can confirm it rather than it being
+        silently trusted."""
         rows = []
         for t in taps:
             if t.outcome not in ("present", "late"):
-                continue
-            if not t.student_id or not t.session_id:
                 continue
             rows.append(AttendanceRecord(
                 org=t.org, session_id=t.session_id, student_id=t.student_id,

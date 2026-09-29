@@ -1,11 +1,21 @@
 import re
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import serializers
 from .tenancy import Organization, Membership, Invitation
+
+
+def check_password(password, user):
+    """Run Django's validators and report failures against the password
+    field, so the form can show them under the right input."""
+    try:
+        validate_password(password, user)
+    except DjangoValidationError as e:
+        raise serializers.ValidationError({"password": list(e.messages)})
 
 
 def unique_slug(name):
@@ -21,7 +31,7 @@ class RegisterSerializer(serializers.Serializer):
     """Creates a user, their institution, and an owner membership."""
     username      = serializers.CharField(max_length=150)
     email         = serializers.EmailField(required=False, allow_blank=True)
-    password      = serializers.CharField(write_only=True, min_length=8)
+    password      = serializers.CharField(write_only=True, min_length=10)
     first_name    = serializers.CharField(max_length=64)
     last_name     = serializers.CharField(max_length=64)
     org_name      = serializers.CharField(max_length=128)
@@ -43,9 +53,13 @@ class RegisterSerializer(serializers.Serializer):
     def validate_email(self, value):
         return value.strip().lower() if value else ""
 
-    def validate_password(self, value):
-        validate_password(value)
-        return value
+    def validate(self, data):
+        probe = User(username=data.get("username", ""),
+                     email=data.get("email", ""),
+                     first_name=data.get("first_name", ""),
+                     last_name=data.get("last_name", ""))
+        check_password(data["password"], probe)
+        return data
 
     @transaction.atomic
     def create(self, validated):
@@ -71,7 +85,7 @@ class AcceptInviteSerializer(serializers.Serializer):
     code       = serializers.CharField(max_length=64)
     username   = serializers.CharField(max_length=150, required=False,
                                        help_text="Required for a new account")
-    password   = serializers.CharField(write_only=True, min_length=8,
+    password   = serializers.CharField(write_only=True, min_length=10,
                                        required=False)
     first_name = serializers.CharField(max_length=64, required=False)
     last_name  = serializers.CharField(max_length=64, required=False)
@@ -109,6 +123,10 @@ class AcceptInviteSerializer(serializers.Serializer):
             if not validated.get("password"):
                 raise serializers.ValidationError(
                     {"password": "Required for a new account."})
+            check_password(validated["password"], User(
+                username=username, email=email,
+                first_name=validated.get("first_name", ""),
+                last_name=validated.get("last_name", "")))
             user = User.objects.create_user(
                 username=username, email=email,
                 password=validated["password"],

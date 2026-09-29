@@ -27,6 +27,10 @@ def tokens_for(user):
 
 
 class RegisterView(APIView):
+    # No authentication at all, not just AllowAny. With JWT auth enabled,
+    # a stale token left in the browser is rejected with a 401 before
+    # AllowAny is even consulted, and sign-up becomes impossible.
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [SignupThrottle]
 
@@ -43,6 +47,7 @@ class RegisterView(APIView):
 
 
 class AcceptInviteView(APIView):
+    authentication_classes = []     # see RegisterView
     permission_classes = [AllowAny]
     throttle_classes = [SignupThrottle]
 
@@ -62,8 +67,17 @@ class MeView(APIView):
 
     def get(self, request):
         m = get_membership(request)
-        orgs = Membership.objects.select_related("org").filter(
-            user=request.user, org__active=True)
+        if request.user.is_superuser:
+            organizations = [
+                {"slug": o.slug, "name": o.name, "role": Membership.OWNER,
+                 "is_default": bool(m and o.pk == m.org_id)}
+                for o in Organization.objects.filter(active=True).order_by("name")]
+        else:
+            organizations = [
+                {"slug": x.org.slug, "name": x.org.name, "role": x.role,
+                 "is_default": x.is_default}
+                for x in Membership.objects.select_related("org").filter(
+                    user=request.user, org__active=True)]
         return Response({
             "user": {
                 "id": request.user.id,
@@ -71,13 +85,12 @@ class MeView(APIView):
                 "email": request.user.email,
                 "first_name": request.user.first_name,
                 "last_name": request.user.last_name,
+                "is_platform_admin": request.user.is_superuser,
             },
             "current_org": ({"slug": m.org.slug, "name": m.org.name,
                              "role": m.role, "term": m.org.term,
                              "timezone": m.org.timezone} if m else None),
-            "organizations": [
-                {"slug": x.org.slug, "name": x.org.name, "role": x.role,
-                 "is_default": x.is_default} for x in orgs],
+            "organizations": organizations,
         })
 
 

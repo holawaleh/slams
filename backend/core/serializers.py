@@ -6,6 +6,17 @@ from .models import (Student, Card, Venue, Course, Enrollment, Device,
                      AttendanceRecord, AuditLog)
 
 
+def unique_in_org(serializer, model, field, value, message):
+    """Per-org unique constraints are not checked by DRF, because org is
+    never an input field. Without this a duplicate is an IntegrityError
+    and a 500 instead of a form error."""
+    qs = model.objects.filter(org=serializer._org(), **{field: value})
+    if serializer.instance is not None:
+        qs = qs.exclude(pk=serializer.instance.pk)
+    if qs.exists():
+        raise serializers.ValidationError(message)
+
+
 class UserBriefSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -33,7 +44,10 @@ class StudentSerializer(TenantSerializer):
         return f"{obj.first_name} {obj.last_name}"
 
     def validate_matric_no(self, value):
-        return value.strip().upper()
+        value = value.strip().upper()
+        unique_in_org(self, Student, "matric_no", value,
+                      "A student with this matric number already exists.")
+        return value
 
 
 class CardSerializer(TenantSerializer):
@@ -67,6 +81,12 @@ class CourseSerializer(TenantSerializer):
                                              read_only=True)
     enrolled_count   = serializers.IntegerField(read_only=True)
 
+    def validate_code(self, value):
+        value = value.strip().upper()
+        unique_in_org(self, Course, "code", value,
+                      "A course with this code already exists.")
+        return value
+
     class Meta:
         model = Course
         fields = ("id", "code", "title", "lecturer", "lecturer_name",
@@ -76,11 +96,18 @@ class CourseSerializer(TenantSerializer):
 class EnrollmentSerializer(TenantSerializer):
     student_name = serializers.CharField(source="student.short_name",
                                          read_only=True)
+    matric_no    = serializers.CharField(source="student.matric_no",
+                                         read_only=True)
+    full_name    = serializers.SerializerMethodField()
     course_code  = serializers.CharField(source="course.code", read_only=True)
 
     class Meta:
         model = Enrollment
-        fields = ("id", "student", "student_name", "course", "course_code", "term")
+        fields = ("id", "student", "student_name", "matric_no", "full_name",
+                  "course", "course_code", "term")
+
+    def get_full_name(self, obj):
+        return f"{obj.student.first_name} {obj.student.last_name}"
 
 
 class DeviceSerializer(TenantSerializer):
@@ -147,7 +174,8 @@ class TapEventSerializer(TenantSerializer):
     class Meta:
         model = TapEvent
         fields = ("id", "device", "device_name", "uid", "student",
-                  "student_name", "session", "outcome", "tapped_at",
+                  "student_name", "session", "outcome", "device_outcome",
+                  "tapped_at",
                   "time_conf", "client_id", "received_at")
         read_only_fields = fields          # the raw log is never edited
 

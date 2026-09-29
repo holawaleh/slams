@@ -29,6 +29,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   async function login(username, password) {
+    // The previous user's org may not be one this user belongs to.
+    localStorage.removeItem("org");
     const { data } = await api.post("/api/auth/login/", { username, password });
     localStorage.setItem("access", data.access);
     localStorage.setItem("refresh", data.refresh);
@@ -42,6 +44,9 @@ export function AuthProvider({ children }) {
   }
 
   async function register(payload) {
+    // A new owner starts clean: an org remembered from an earlier
+    // session would otherwise ride along on the X-Org header.
+    localStorage.removeItem("org");
     const { data } = await api.post("/api/auth/register/", payload);
     localStorage.setItem("access", data.tokens.access);
     localStorage.setItem("refresh", data.tokens.refresh);
@@ -60,11 +65,13 @@ export function AuthProvider({ children }) {
     clearSession();
   }
 
-  const isAdmin = org?.role === "owner" || org?.role === "admin";
+  const isPlatformAdmin = !!user?.is_platform_admin;
+  const isAdmin = isPlatformAdmin || org?.role === "owner" || org?.role === "admin";
 
   return (
     <AuthContext.Provider
-      value={{ user, org, orgs, loading, isAdmin, login, register, logout }}
+      value={{ user, org, orgs, loading, isAdmin, isPlatformAdmin,
+               login, register, logout }}
     >
       {children}
     </AuthContext.Provider>
