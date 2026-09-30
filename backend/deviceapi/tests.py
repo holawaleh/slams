@@ -161,3 +161,49 @@ class TimingTests(TestCase):
         opened.status = "open"
         opened.save()
         self.assertEqual(active_session_for(self.device).id, opened.id)
+
+
+class DirectoryV2Tests(TestCase):
+    """The card list the reader downloads, with names, in pages."""
+
+    def setUp(self):
+        import struct
+        self.struct = struct
+        self.org = Organization.objects.create(name="U", slug="u")
+        self.device = Device.objects.create(org=self.org, name="R")
+        self.api = APIClient()
+        self.api.credentials(HTTP_AUTHORIZATION=f"Device {self.device.token}")
+        for i in range(5):
+            s = Student.objects.create(org=self.org, matric_no=f"M{i}",
+                                       full_name=f"Adéyemí Holawale {i}")
+            Card.objects.create(org=self.org, uid=f"0A0B0C{i:02X}", student=s)
+
+    def get(self, **q):
+        r = self.api.get("/api/device/directory/", {"layout": "2", **q})
+        return r
+
+    def parse(self, body):
+        magic, ver, total, off, n = self.struct.unpack_from("<4sIIII", body)
+        recs = [self.struct.unpack_from("<10sBHB16s", body, 20 + i * 30) for i in range(n)]
+        return magic, ver, total, off, recs
+
+    def test_pages_cover_every_card_once_with_names(self):
+        seen, off = [], 0
+        while True:
+            magic, ver, total, o, recs = self.parse(self.get(offset=off, limit=2).content)
+            self.assertEqual((magic, o), (b"SLM2", off))
+            seen += recs
+            off += len(recs)
+            if off >= total:
+                break
+        self.assertEqual(len(seen), 5)
+        names = [r[4].rstrip(b"\x00").decode() for r in seen]
+        self.assertEqual(names[0], "ADEYEMI HOLAWALE")          # accents dropped, 16 max
+        uids = [r[0][:r[1]] for r in seen]
+        self.assertEqual(uids, sorted(uids))                   # binary-searchable
+
+    def test_unchanged_version_is_304_and_old_format_still_served(self):
+        _, ver, *_ = self.parse(self.get().content)
+        self.assertEqual(self.get(version=ver).status_code, 304)
+        old = self.api.get("/api/device/directory/")
+        self.assertEqual(old.content[:4], b"SLMD")

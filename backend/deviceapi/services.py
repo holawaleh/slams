@@ -213,6 +213,58 @@ def pack_directory(org):
     return bytes(out), version, len(rows)
 
 
+# Format 2: the same records plus the holder's name for the reader's
+# display, served in pages.
+#
+#   header:  magic 'SLM2' | version u32 | total u32 | offset u32 | count u32
+#   record:  uid[10] | len u8 | student_id u16 | flags u8 | name[16]
+#
+# 400 records x 30 bytes = 12 KB, inside the reader's 16 KB buffer.
+
+DIR2_MAGIC = b"SLM2"
+DIR2_HDR   = struct.Struct("<4sIIII")
+DIR2_REC   = struct.Struct("<10sBHB16s")
+DIR2_PAGE  = 400
+
+
+def display_name(text):
+    """What fits on one line of the reader's 16-character display. The
+    display only has ASCII, so accents are dropped rather than garbled."""
+    import unicodedata
+    plain = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode()
+    return " ".join(plain.split()).upper()[:16].encode("ascii")
+
+
+def pack_directory_v2(org, offset=0, limit=DIR2_PAGE):
+    cards = (Card.objects.filter(org=org, active=True)
+             .select_related("student", "holder")
+             .only("uid", "student_id", "is_admin", "student__short_name",
+                   "student__full_name", "holder__first_name", "holder__last_name"))
+    rows = []
+    for c in cards:
+        if len(c.uid) % 2 or len(c.uid) > 20:
+            continue
+        raw = bytes.fromhex(c.uid)
+        if c.student_id:
+            name = c.student.short_name or c.student.full_name
+        elif c.holder_id:
+            name = c.holder.get_full_name()
+        else:
+            name = ""
+        rows.append((raw, len(raw), (c.student_id or 0) % 65536,
+                     1 if c.is_admin else 0, display_name(name)))
+    # Same order as format 1, so the reader can binary search it as-is.
+    rows.sort(key=lambda r: (r[0][:r[1]], r[1]))
+
+    version = _directory_version(org)
+    page = rows[offset:offset + limit]
+    out = bytearray(DIR2_HDR.pack(DIR2_MAGIC, version, len(rows), offset, len(page)))
+    for raw, length, sid, flags, name in page:
+        out += DIR2_REC.pack(raw.ljust(10, b"\x00"), length, sid, flags,
+                             name.ljust(16, b"\x00"))
+    return bytes(out), version, len(rows)
+
+
 def _directory_version(org):
     """Derived from the newest card change, so no extra column is needed."""
     from django.db.models import Max

@@ -11,7 +11,8 @@ from core.models import Card, Device, TapEvent, AttendanceRecord
 from .authentication import DeviceTokenAuthentication
 from .permissions import IsDevice
 from .services import (active_session_for, roster_for, bundle_version,
-                       pack_directory, judge_taps)
+                       pack_directory, pack_directory_v2, DIR2_PAGE,
+                       judge_taps)
 
 FIRMWARE_LATEST = "0.1.0"
 
@@ -116,12 +117,31 @@ class DirectoryView(DeviceView):
 
     def get(self, request):
         self.touch(request)
-        blob, version, count = pack_directory(request.device.org)
-
         try:
             have = int(request.query_params.get("version", -1))
         except (TypeError, ValueError):
             have = -1
+
+        # Layout 2 carries each holder's name for the display, and comes in
+        # pages so a large school fits the reader's receive buffer. It is
+        # ?layout=2 because DRF reserves ?format= for content negotiation.
+        # Readers that do not ask for it get layout 1 unchanged.
+        if request.query_params.get("layout") == "2":
+            try:
+                offset = max(0, int(request.query_params.get("offset", 0)))
+                limit = int(request.query_params.get("limit", DIR2_PAGE))
+            except (TypeError, ValueError):
+                offset, limit = 0, DIR2_PAGE
+            limit = min(max(limit, 1), DIR2_PAGE)
+            blob, version, total = pack_directory_v2(request.device.org, offset, limit)
+            if have == version and offset == 0:
+                return HttpResponse(status=304)
+            resp = HttpResponse(blob, content_type="application/octet-stream")
+            resp["X-Directory-Version"] = str(version)
+            resp["X-Directory-Count"] = str(total)
+            return resp
+
+        blob, version, count = pack_directory(request.device.org)
         if have == version:
             return HttpResponse(status=304)
 
