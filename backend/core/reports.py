@@ -81,6 +81,37 @@ class ReportView(APIView):
         return qs
 
 
+class RecheckTaps(APIView):
+    """POST /api/reports/recheck/ {from, to} - judge again the taps in a
+    date range that did not count, after the timetable, enrolments or a
+    reader's venue have been corrected. Admins only; always audited."""
+    permission_classes = [IsOrgMember]
+
+    def post(self, request):
+        from deviceapi.services import recheck_taps, RECHECKABLE
+        from .models import TapEvent
+        from .views import audit
+        m = get_membership(request)
+        if not m.can_administer:
+            return Response({"detail": "Administrator privileges are required."},
+                            status=status.HTTP_403_FORBIDDEN)
+        try:
+            first = date.fromisoformat(request.data["from"]) if request.data.get("from") else None
+            last = date.fromisoformat(request.data["to"]) if request.data.get("to") else None
+        except (TypeError, ValueError):
+            return Response({"detail": "Dates must be YYYY-MM-DD."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if first is None:          # default: the last two weeks
+            first = timezone.localdate() - timedelta(days=14)
+        taps = within(TapEvent.objects.filter(org=m.org, outcome__in=RECHECKABLE),
+                      m.org, first, last, field="tapped_at")
+        checked, counted = recheck_taps(taps)
+        audit(request, "taps_recheck",
+              f"{first} to {last or 'today'}: {checked} checked, {counted} now counted")
+        return Response({"checked": checked, "counted": counted,
+                         "from": first, "to": last})
+
+
 class OverviewReport(ReportView):
     """One row per course: how many lectures were held, and how well
     they were attended."""

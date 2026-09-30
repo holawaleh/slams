@@ -154,6 +154,59 @@ def judge_taps(device, taps):
     return out
 
 
+# A tap that did not count only because the setup was wrong at the time:
+# no lecture found (reader not placed, lecture added to the timetable
+# late) or the student not enrolled yet. "unknown" (card not registered)
+# and "time_unknown" cannot change by being judged again.
+RECHECKABLE = ("no_session", "not_enrolled")
+
+
+def recheck_taps(taps):
+    """Judge stored taps again against the timetable, enrolments and
+    reader venues as they are now, and count the ones that now qualify.
+
+    For after a mistake is fixed: a reader placed in its room late, a
+    lecture added to the timetable after it happened, a student enrolled
+    after they started attending. Returns (checked, newly_counted).
+    Running it twice changes nothing the second time."""
+    from core.models import AttendanceRecord, TapEvent
+    taps = list(taps.select_related("device", "device__org", "device__venue")
+                    .order_by("tapped_at"))
+    checked = counted = 0
+    by_device = {}
+    for t in taps:
+        by_device.setdefault(t.device_id, []).append(t)
+
+    for group in by_device.values():
+        device = group[0].device
+        cards = {c.uid: c for c in Card.objects.filter(
+            org=device.org, active=True, uid__in={t.uid for t in group})}
+        pending = [{"card": cards.get(t.uid),
+                    "tapped_at": None if t.time_conf == "unknown" else t.tapped_at}
+                   for t in group]
+        rows = []
+        for t, (outcome, session) in zip(group, judge_taps(device, pending)):
+            checked += 1
+            card = cards.get(t.uid)
+            if outcome == t.outcome and (session.id if session else None) == t.session_id:
+                continue
+            t.outcome, t.session = outcome, session
+            t.student = card.student if card else t.student
+            TapEvent.objects.filter(pk=t.pk).update(
+                outcome=outcome, session=session, student=t.student)
+            if outcome in ("present", "late"):
+                counted += 1
+                rows.append(AttendanceRecord(
+                    org=t.org, session=session, student_id=t.student_id,
+                    status=outcome, tapped_at=t.tapped_at, device=device,
+                    verified=(t.time_conf == "synced")))
+        # Earliest tap first, so a student's first tap in a lecture is the
+        # one that sets present or late.
+        if rows:
+            AttendanceRecord.objects.bulk_create(rows, ignore_conflicts=True)
+    return checked, counted
+
+
 def roster_for(session):
     """Students enrolled on the session's course, with display names."""
     if session is None:

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import api from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { PageHead, Loading, Empty, ErrorBox } from "../components/bits";
 
 // Date range shared by both report screens; remembered for the session
@@ -48,21 +49,62 @@ function Rate({ value, threshold }) {
 }
 
 export default function Reports() {
+  const { isAdmin } = useAuth();
   const range = useRange();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [rechecking, setRechecking] = useState(false);
+  const [flash, setFlash] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   const key = JSON.stringify(range.params);
 
   useEffect(() => {
     setError(null);
     api.get("/api/reports/overview/", { params: JSON.parse(key) })
        .then(({ data }) => setData(data)).catch(setError);
-  }, [key]);
+  }, [key, reloadKey]);
+
+  // For after a fix: a reader placed in its room late, a lecture added to
+  // the timetable after it happened, a student enrolled late. Taps that
+  // did not count are judged again; nothing already counted changes.
+  async function recheck() {
+    setRechecking(true);
+    setError(null);
+    try {
+      const { data: r } = await api.post("/api/reports/recheck/", {
+        from: range.from || undefined, to: range.to || undefined });
+      setFlash(r.counted
+        ? `${r.counted} of ${r.checked} tap${r.checked === 1 ? "" : "s"} now count as attendance.`
+        : r.checked ? `Checked ${r.checked} tap${r.checked === 1 ? "" : "s"}; none of them fall in a lecture the student is enrolled on.`
+                    : "There were no uncounted taps to check.");
+      setTimeout(() => setFlash(""), 8000);
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setRechecking(false);
+    }
+  }
 
   return (
     <>
-      <PageHead title="Reports" subtitle={data ? `Attendance by course · term ${data.term}` : null} />
+      <PageHead title="Reports" subtitle={data ? `Attendance by course · term ${data.term}` : null}>
+        {isAdmin && (
+          <button className="btn-ghost" onClick={recheck} disabled={rechecking}
+                  title="Count taps again after fixing the timetable, enrolments or a reader's venue">
+            {rechecking ? "Re-checking..." : "Re-check taps"}
+          </button>
+        )}
+      </PageHead>
+      {flash && <div className="alert alert-ok">{flash}</div>}
       <RangePicker range={range} />
+      {isAdmin && (
+        <p className="faint" style={{ fontSize: 13, marginTop: -8 }}>
+          Taps that did not count because a reader had no venue, a lecture was added
+          late or a student was enrolled late can be counted with <strong>Re-check taps</strong>{" "}
+          ({range.from || range.to ? "for the dates above" : "for the last two weeks"}).
+        </p>
+      )}
       <ErrorBox error={error} />
       <div className="card" style={{ padding: 0 }}>
         {!data ? <Loading what="report" /> : data.courses.length === 0 ? (

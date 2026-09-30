@@ -25,6 +25,7 @@ urlpatterns = [
     path("me/password/",  account.ChangePasswordView.as_view()),
     path("organization/", auth_views.OrganizationView.as_view()),
     path("reports/overview/", reports.OverviewReport.as_view()),
+    path("reports/recheck/", reports.RecheckTaps.as_view()),
     path("reports/course/<int:pk>/", reports.CourseReport.as_view()),
     path("", include(router.urls)),
 ]

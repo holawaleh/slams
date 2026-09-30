@@ -340,3 +340,65 @@ class ReportTests(TestCase):
     def test_other_school_cannot_read_report(self):
         _, other = owner_of("other")
         self.assertEqual(other.get(f"/api/reports/course/{self.course.pk}/").status_code, 404)
+
+
+class RecheckTests(TestCase):
+    """Taps that did not count because the setup was wrong at the time
+    are counted once it is fixed - exactly what happened on the bench:
+    a reader used for a whole lecture before it was given a venue."""
+
+    def setUp(self):
+        self.org, self.api = owner_of("uni")
+        self.venue = Venue.objects.create(org=self.org, code="LT1", name="LT1")
+        self.course = Course.objects.create(org=self.org, code="CSC101", title="x")
+        self.student = Student.objects.create(org=self.org, full_name="Ada Obi",
+                                              matric_no="M1")
+        Card.objects.create(org=self.org, uid="0A0B0C0D", student=self.student)
+        Enrollment.objects.create(org=self.org, student=self.student,
+                                  course=self.course, term=self.org.term)
+        now = timezone.now()
+        self.session = ClassSession.objects.create(
+            org=self.org, course=self.course, venue=self.venue,
+            starts_at=now - timedelta(hours=2), ends_at=now - timedelta(minutes=30))
+        self.device = Device.objects.create(org=self.org, name="R1")   # no venue
+        for i, minutes in enumerate((100, 95)):
+            TapEvent.objects.create(
+                org=self.org, device=self.device, uid="0A0B0C0D",
+                student=self.student, outcome="no_session",
+                tapped_at=now - timedelta(minutes=minutes), client_id=i)
+
+    def test_first_placement_counts_the_earlier_taps(self):
+        r = self.api.patch(f"/api/devices/{self.device.pk}/",
+                           {"venue": self.venue.pk}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        rec = AttendanceRecord.objects.get()
+        self.assertEqual((rec.session, rec.status), (self.session, "late"))
+        self.assertEqual(set(TapEvent.objects.values_list("outcome", flat=True)), {"late"})
+
+    def test_moving_a_placed_reader_does_not_rejudge(self):
+        other = Venue.objects.create(org=self.org, code="LT2", name="LT2")
+        Device.objects.filter(pk=self.device.pk).update(venue=other)
+        self.api.patch(f"/api/devices/{self.device.pk}/", {"venue": self.venue.pk},
+                       format="json")
+        self.assertFalse(AttendanceRecord.objects.exists())
+
+    def test_manual_recheck_after_late_enrolment(self):
+        Device.objects.filter(pk=self.device.pk).update(venue=self.venue)
+        Enrollment.objects.all().delete()
+        r = self.api.post("/api/reports/recheck/", {}, format="json")
+        self.assertEqual(r.json()["counted"], 0)
+        self.assertEqual(TapEvent.objects.first().outcome, "not_enrolled")
+        Enrollment.objects.create(org=self.org, student=self.student,
+                                  course=self.course, term=self.org.term)
+        r = self.api.post("/api/reports/recheck/", {}, format="json")
+        self.assertEqual((r.json()["checked"], r.json()["counted"]), (2, 2))
+        self.assertEqual(AttendanceRecord.objects.count(), 1)       # one per lecture
+        again = self.api.post("/api/reports/recheck/", {}, format="json").json()
+        self.assertEqual(again["checked"], 0)                        # nothing left to fix
+
+    def test_recheck_is_admin_only(self):
+        u = User.objects.create_user("lect", password="x")
+        Membership.objects.create(user=u, org=self.org, role=Membership.LECTURER)
+        c = APIClient()
+        c.force_authenticate(u)
+        self.assertEqual(c.post("/api/reports/recheck/", {}, format="json").status_code, 403)

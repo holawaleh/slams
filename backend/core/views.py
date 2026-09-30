@@ -494,9 +494,22 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         return Response(self.get_serializer(device).data)
 
     def perform_update(self, serializer):
+        was_placed = serializer.instance.venue_id is not None
         device = serializer.save()
         audit(self.request, "device_update",
               f"{device.name} {device.hardware_id}")
+        # First placement: every tap it took so far happened in this room,
+        # and none could count because it had no venue. Judge them again.
+        # (A reader moved between rooms is not re-judged: its earlier taps
+        # belong to the room it was in then.)
+        if not was_placed and device.venue_id:
+            from deviceapi.services import recheck_taps, RECHECKABLE
+            checked, counted = recheck_taps(TapEvent.objects.filter(
+                org=self.org, device=device, outcome__in=RECHECKABLE))
+            if checked:
+                audit(self.request, "taps_recheck",
+                      f"{device.name} placed in {device.venue.code}: "
+                      f"{checked} checked, {counted} now counted")
 
     def perform_destroy(self, instance):
         """Removing a reader frees its hardware id so another account can
