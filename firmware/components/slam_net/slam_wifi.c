@@ -37,7 +37,11 @@ static char s_ap_pass[16];
 
 // Backoff so a dead network is not hammered. Your old firmware retried
 // every 30 seconds forever, which is 2880 pointless attempts a day.
-static const int RETRY_SECONDS[] = { 30, 60, 120, 300, 900 };
+// Capped at a minute: a reader offline for 15 minutes after a short
+// router hiccup misses most of a lecture's check-in window.
+static const int RETRY_SECONDS[] = { 15, 30, 60 };
+// Why the last attempt failed, from the disconnect event.
+static volatile uint8_t s_last_reason;
 static int     s_retry_step;
 static int64_t s_next_retry_ms;
 
@@ -148,7 +152,9 @@ static void on_wifi_event(void *arg, esp_event_base_t base,
             (wifi_event_sta_disconnected_t *)data;
         // 15 = handshake timeout, almost always a wrong password.
         // 201 = the network was not found at all.
+        s_last_reason = d->reason;
         ESP_LOGW(TAG, "disconnect reason %d%s", d->reason,
+                 d->reason == 2   ? " (router did not answer in time)" :
                  d->reason == 15  ? " (wrong password?)" :
                  d->reason == 201 ? " (network not found)" : "");
         if (s_state == NET_CONNECTED || s_state == NET_DUAL) {
@@ -231,24 +237,36 @@ static bool try_network(int index)
         return false;
     }
 
-    // Clear the flags immediately before connecting, so a failure left
-    // over from the previous network cannot end this attempt early.
-    xEventGroupClearBits(s_events, CONNECT_BIT | FAIL_BIT);
+    // A router that is slow to answer (reason 2, auth expired; 4, assoc
+    // expired) is usually fine a second later - on the bench most first
+    // attempts failed this way and the retry went through. A wrong
+    // password or a missing network will not change, so those give up.
+    for (int attempt = 0; attempt < 4; attempt++) {
+        // Clear the flags immediately before connecting, so a failure left
+        // over from the previous attempt cannot end this one early.
+        xEventGroupClearBits(s_events, CONNECT_BIT | FAIL_BIT);
+        s_last_reason = 0;
 
-    err = esp_wifi_connect();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "connect call failed: %s", esp_err_to_name(err));
-        vTaskDelay(pdMS_TO_TICKS(500));
-        return false;
-    }
+        err = esp_wifi_connect();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "connect call failed: %s", esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(500));
+            return false;
+        }
 
-    EventBits_t bits = xEventGroupWaitBits(
-        s_events, CONNECT_BIT | FAIL_BIT, pdFALSE, pdFALSE,
-        pdMS_TO_TICKS(12000));
+        EventBits_t bits = xEventGroupWaitBits(
+            s_events, CONNECT_BIT | FAIL_BIT, pdFALSE, pdFALSE,
+            pdMS_TO_TICKS(12000));
 
-    if (bits & CONNECT_BIT) {
-        s_current = index;
-        return true;
+        if (bits & CONNECT_BIT) {
+            s_current = index;
+            return true;
+        }
+        bool transient = s_last_reason == 2 || s_last_reason == 4 ||
+                         s_last_reason == 8 || s_last_reason == 205;
+        if (!transient) return false;
+        ESP_LOGI(TAG, "retrying %s (%d of 3)", s_nets[index].ssid, attempt + 1);
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
     return false;
 }
