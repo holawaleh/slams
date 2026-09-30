@@ -16,7 +16,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import AttendanceRecord, ClassSession, Course, Student
-from .permissions import IsLecturerOrAdmin, get_membership
+from .permissions import IsOrgMember, get_membership
+from .tenancy import Membership
 
 # Below this share of lectures attended, a student is flagged.
 AT_RISK_PERCENT = 75
@@ -68,13 +69,16 @@ def pct(part, whole):
 
 
 class ReportView(APIView):
-    permission_classes = [IsLecturerOrAdmin]
+    permission_classes = [IsOrgMember]
 
     def courses(self, request):
-        """Admins see every course; a lecturer only their own."""
+        """Admins and viewers (registry, heads of department) see every
+        course; a lecturer only the courses they teach."""
         m = get_membership(request)
         qs = Course.objects.filter(org=m.org)
-        return qs if m.can_administer else qs.filter(lecturer=request.user)
+        if m.role == Membership.LECTURER:
+            return qs.filter(lecturer=request.user)
+        return qs
 
 
 class OverviewReport(ReportView):

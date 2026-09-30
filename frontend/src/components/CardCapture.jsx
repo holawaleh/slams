@@ -68,8 +68,8 @@ export default function CardCapture({ onCaptured, onCancel, studentId }) {
   if (readers && readers.length === 0) {
     return (
       <div className="capture">
-        <p style={{ margin: 0 }}>No reader is set up yet. Add one on the Devices page,
-          or type the card number instead.</p>
+        <p style={{ margin: 0 }}>No reader is set up yet. An admin can add one under
+          Settings → Devices; cards are registered by tapping them on a reader.</p>
         <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
           <button type="button" className="btn-ghost btn-sm" onClick={onCancel}>Close</button>
         </div>

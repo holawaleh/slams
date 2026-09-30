@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import api from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useList, useDebounced } from "../lib/useList";
-import { PageHead, Loading, Empty, ErrorBox } from "../components/bits";
+import { Loading, Empty, ErrorBox } from "../components/bits";
 import Pager from "../components/Pager";
 
 // What the server decided about each swipe.
@@ -29,7 +29,7 @@ function when(iso, tz) {
   });
 }
 
-function Swipes() {
+export function Swipes() {
   const { org } = useAuth();
   const [query, setQuery] = useState("");
   const search = useDebounced(query);
@@ -131,9 +131,11 @@ const ACTIONS = {
   device_remove: "Reader removed", device_token_reveal: "Reader token viewed",
   device_token_rotate: "Reader token replaced",
   session_open: "Lecture opened", session_close: "Lecture closed",
+  staff_add: "Staff added", staff_role: "Staff role changed",
+  staff_remove: "Staff removed", staff_password: "Staff password reset",
 };
 
-function AdminActions() {
+export function AdminActions() {
   const { org } = useAuth();
   const [query, setQuery] = useState("");
   const search = useDebounced(query);
@@ -169,30 +171,6 @@ function AdminActions() {
         )}
       </div>
       <Pager page={page} setPage={setPage} count={count} />
-    </>
-  );
-}
-
-export default function Logs() {
-  const { isAdmin } = useAuth();
-  const [tab, setTab] = useState("swipes");
-  return (
-    <>
-      <PageHead title="Activity log"
-                subtitle="Every card swipe, and every change made in the dashboard" />
-      {isAdmin && (
-        <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "swipes"}
-                  className={tab === "swipes" ? "on" : ""} onClick={() => setTab("swipes")}>
-            Card swipes
-          </button>
-          <button role="tab" aria-selected={tab === "admin"}
-                  className={tab === "admin" ? "on" : ""} onClick={() => setTab("admin")}>
-            Admin actions
-          </button>
-        </div>
-      )}
-      {tab === "swipes" || !isAdmin ? <Swipes /> : <AdminActions />}
     </>
   );
 }

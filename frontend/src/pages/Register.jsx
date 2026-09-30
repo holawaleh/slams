@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { PASSWORD_RULES, passwordOk, missingRules } from "../lib/password";
+import { PASSWORD_RULES, passwordOk, missingRules, MIN_LENGTH } from "../lib/password";
 import PasswordInput from "../components/PasswordInput";
 import ThemeToggle from "../components/ThemeToggle";
 import "./Login.css";
@@ -9,16 +9,19 @@ import "./Login.css";
 const TEXT_FIELDS = [
   { name: "org_name",   label: "School",           autoComplete: "organization",
     placeholder: "e.g. Computer Science" },
-  { name: "first_name", label: "First name",       autoComplete: "given-name" },
-  { name: "last_name",  label: "Last name",        autoComplete: "family-name" },
+  { name: "address",    label: "Address",          autoComplete: "street-address",
+    placeholder: "Street, town, state" },
   { name: "username",   label: "Username",         autoComplete: "username",
-    placeholder: "letters, numbers, . _ -" },
-  { name: "email",      label: "Email (optional)", autoComplete: "email",
-    type: "email", optional: true },
+    placeholder: "letters, numbers, . _ -",
+    hint: "You will use this to log in." },
+  { name: "email",      label: "Email",            autoComplete: "email",
+    type: "email" },
 ];
 
-const EMPTY = { org_name: "", first_name: "", last_name: "", username: "",
-                email: "", password: "", confirm: "" };
+const EMPTY = { org_name: "", address: "", username: "", email: "",
+                password: "", confirm: "" };
+
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function Register() {
   const [form, setForm] = useState(EMPTY);
@@ -36,8 +39,10 @@ export default function Register() {
     setError("");
     const local = {};
     for (const f of TEXT_FIELDS) {
-      if (!f.optional && !form[f.name].trim()) local[f.name] = "Required.";
+      if (!form[f.name].trim()) local[f.name] = "Required.";
     }
+    if (form.email.trim() && !EMAIL_RX.test(form.email.trim()))
+      local.email = "Enter a valid email address.";
     if (!passwordOk(form.password))
       local.password = `Still needed: ${missingRules(form.password).join(", ")}.`;
     if (form.confirm !== form.password)
@@ -50,6 +55,8 @@ export default function Register() {
       const { confirm: _confirm, ...payload } = form;
       payload.username = payload.username.trim().toLowerCase();
       payload.org_name = payload.org_name.trim();
+      payload.address = payload.address.trim();
+      payload.email = payload.email.trim().toLowerCase();
       await register(payload);
       navigate("/dashboard");
     } catch (err) {
@@ -94,7 +101,8 @@ export default function Register() {
                      autoCapitalize={f.name === "username" ? "off" : undefined}
                      aria-invalid={!!errors[f.name] || undefined}
                      onChange={set(f.name)} />
-              {errors[f.name] && <small className="field-error">{errors[f.name]}</small>}
+              {errors[f.name] ? <small className="field-error">{errors[f.name]}</small>
+                : f.hint && <small className="faint" style={{ display: "block", marginTop: 6 }}>{f.hint}</small>}
             </div>
           ))}
 
@@ -116,7 +124,7 @@ export default function Register() {
                     <span aria-hidden="true">{met ? "✓" : failed ? "✗" : "•"}</span>
                     {r.label}
                     {i === 0 && form.password.length > 0 && (
-                      <span className="pw-count">({form.password.length}/10)</span>
+                      <span className="pw-count">({form.password.length}/{MIN_LENGTH})</span>
                     )}
                   </li>
                 );

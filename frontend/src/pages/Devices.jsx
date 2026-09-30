@@ -5,6 +5,13 @@ import { PageHead, Loading, Empty, ErrorBox, errorText } from "../components/bit
 import Modal from "../components/Modal";
 import { ago } from "./Cards";
 
+// Reader IDs are MAC addresses. The field only accepts hex digits and
+// places the colons itself: typing a4cf12345678 shows A4:CF:12:34:56:78.
+export function maskMac(value) {
+  const hex = value.toUpperCase().replace(/[^0-9A-F]/g, "").slice(0, 12);
+  return hex.match(/.{1,2}/g)?.join(":") ?? "";
+}
+
 function useVenues() {
   const [venues, setVenues] = useState([]);
   useEffect(() => {
@@ -57,8 +64,13 @@ function DeviceForm({ device, onClose, onSaved }) {
         <div className="field">
           <label htmlFor="hw">Reader ID</label>
           <input id="hw" className="input mono" autoFocus={!editing} required
-                 placeholder="A4:CF:12:34:56:78" autoComplete="off" spellCheck={false}
-                 value={form.hardware_id} onChange={set("hardware_id")} />
+                 placeholder="__:__:__:__:__:__" autoComplete="off" spellCheck={false}
+                 inputMode="text" maxLength={17} autoCapitalize="characters"
+                 value={form.hardware_id}
+                 onChange={(e) => setForm({ ...form, hardware_id: maskMac(e.target.value) })} />
+          <small className="faint" style={{ display: "block", marginTop: 6 }}>
+            {form.hardware_id.replace(/:/g, "").length}/12 characters
+          </small>
           {fieldErr("hardware_id")}
           <small className="faint" style={{ display: "block", marginTop: 6 }}>
             Shown on the reader's screen for a few seconds when it powers on,
@@ -87,7 +99,9 @@ function DeviceForm({ device, onClose, onSaved }) {
         </p>
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-solid" disabled={busy || !form.name.trim()}>
+          <button className="btn-solid"
+                  disabled={busy || !form.name.trim() ||
+                            (!editing && form.hardware_id.length !== 17)}>
             {busy ? "Saving..." : editing ? "Save" : "Add reader"}
           </button>
         </div>
@@ -137,7 +151,7 @@ function TokenDialog({ device, onClose }) {
   );
 }
 
-export default function Devices() {
+export default function Devices({ embedded = false }) {
   const { rows, loading, error, reload } = useList("/api/devices/", { active: true });
   const [editing, setEditing] = useState(null);     // "new" | device
   const [showToken, setShowToken] = useState(null);
@@ -165,9 +179,16 @@ export default function Devices() {
 
   return (
     <>
-      <PageHead title="Devices" subtitle="Card readers in your lecture halls">
-        <button className="btn-solid" onClick={() => setEditing("new")}>Add reader</button>
-      </PageHead>
+      {embedded ? (
+        <div className="spread filters">
+          <p className="muted" style={{ margin: 0 }}>Card readers in your lecture halls.</p>
+          <button className="btn-solid" onClick={() => setEditing("new")}>Add reader</button>
+        </div>
+      ) : (
+        <PageHead title="Devices" subtitle="Card readers in your lecture halls">
+          <button className="btn-solid" onClick={() => setEditing("new")}>Add reader</button>
+        </PageHead>
+      )}
 
       {flash && <div className="alert alert-ok">{flash}</div>}
       <ErrorBox error={error || actionError} />

@@ -14,6 +14,9 @@ from .auth_serializers import (RegisterSerializer, AcceptInviteSerializer,
                                InvitationSerializer, MembershipSerializer,
                                OrganizationSerializer)
 from .permissions import IsOrgMember, IsOrgAdmin, get_membership
+from . import account
+from .pagination import LargePagination
+from .views import audit
 
 
 class SignupThrottle(AnonRateThrottle):
@@ -120,47 +123,47 @@ class OrganizationView(APIView):
 
 class MembershipViewSet(mixins.ListModelMixin, mixins.UpdateModelMixin,
                         mixins.DestroyModelMixin, viewsets.GenericViewSet):
-    """Manage who is in this organization."""
+    """Manage who is in this organization. The role rules live in
+    core/account.py so every path applies the same ones."""
     serializer_class = MembershipSerializer
     permission_classes = [IsOrgMember]
+    pagination_class = LargePagination
 
     def get_queryset(self):
         m = get_membership(self.request)
         return Membership.objects.select_related("user", "org").filter(
-            org=m.org).order_by("user__username")
+            org=m.org).order_by("user__first_name", "user__username")
 
-    def _require_admin(self):
-        m = get_membership(self.request)
-        if not m.can_administer:
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied("Administrator privileges required.")
-        return m
+    def create(self, request):
+        """Add a staff member with a temporary password."""
+        m = account.add_staff(request)
+        audit(request, "staff_add", f"{m.user.username} as {m.role}")
+        return Response(MembershipSerializer(m).data,
+                        status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
-        me = self._require_admin()
         target = self.get_object()
-        # The last owner cannot be demoted, or the org becomes unmanageable.
-        if (target.role == Membership.OWNER
-                and serializer.validated_data.get("role") != Membership.OWNER):
-            owners = Membership.objects.filter(
-                org=me.org, role=Membership.OWNER).count()
-            if owners <= 1:
-                from rest_framework.exceptions import ValidationError
-                raise ValidationError("The organization needs one owner.")
+        new_role = serializer.validated_data.get("role", target.role)
+        account.check_role_change(self.request, target, new_role)
         serializer.save()
+        if new_role != target.role:
+            audit(self.request, "staff_role",
+                  f"{target.user.username}: {target.role} -> {new_role}")
 
     def perform_destroy(self, instance):
-        me = self._require_admin()
-        if instance.user_id == self.request.user.id:
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError("You cannot remove yourself.")
-        if instance.role == Membership.OWNER:
-            owners = Membership.objects.filter(
-                org=me.org, role=Membership.OWNER).count()
-            if owners <= 1:
-                from rest_framework.exceptions import ValidationError
-                raise ValidationError("The organization needs one owner.")
+        account.check_remove(self.request, instance)
+        audit(self.request, "staff_remove",
+              f"{instance.user.username} ({instance.role})")
         instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def set_password(self, request, pk=None):
+        """Give a staff member a new temporary password, e.g. when they
+        have forgotten theirs."""
+        target = self.get_object()
+        account.reset_staff_password(request, target)
+        audit(request, "staff_password", target.user.username)
+        return Response({"detail": "Password changed."})
 
     @action(detail=False, methods=["post"])
     def switch(self, request):

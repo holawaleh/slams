@@ -537,6 +537,12 @@ class ClassSessionViewSet(TenantScopedMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        # ?running=true: lectures under way right now, whether the timetable
+        # started them or a lecturer opened them by hand.
+        if self.request.query_params.get("running") == "true":
+            now = timezone.now()
+            qs = qs.filter(starts_at__lte=now, ends_at__gte=now).exclude(
+                status__in=["closed", "cancelled"])
         m = get_membership(self.request)
         if m.can_administer:
             return qs

@@ -9,6 +9,7 @@ class Organization(models.Model):
     name       = models.CharField(max_length=128)
     slug       = models.SlugField(max_length=48, unique=True,
                                   help_text="Short code used in invites")
+    address    = models.CharField(max_length=255, blank=True)
     country    = models.CharField(max_length=64, blank=True)
     term       = models.CharField(max_length=16, default="2025/2026-1",
                                   help_text="Current academic term")

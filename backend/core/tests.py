@@ -87,8 +87,14 @@ class StudentCourseApiTests(TestCase):
 
 
 class RegisterTests(TestCase):
-    BODY = {"org_name": "Test School", "first_name": "A", "last_name": "B",
-            "username": "newowner", "email": "", "password": "Xk9!mQ2#vLp7"}
+    BODY = {"org_name": "Test School", "address": "12 Campus Road, Ibadan",
+            "username": "newowner", "email": "Owner@School.edu",
+            "password": "Xk9!mQ2#"}
+
+    def setUp(self):
+        # Sign-up is rate limited per network; start every test fresh.
+        from django.core.cache import cache
+        cache.clear()
 
     def test_register_works(self):
         r = APIClient().post("/api/auth/register/", self.BODY, format="json")
@@ -102,6 +108,27 @@ class RegisterTests(TestCase):
         c.credentials(HTTP_AUTHORIZATION="Bearer stale.expired.token")
         r = c.post("/api/auth/register/", self.BODY, format="json")
         self.assertEqual(r.status_code, 201, r.content)
+
+    def test_register_stores_school_address_and_email(self):
+        from django.contrib.auth.models import User
+        APIClient().post("/api/auth/register/", self.BODY, format="json")
+        u = User.objects.get(username="newowner")
+        self.assertEqual(u.email, "owner@school.edu")
+        org = Organization.objects.get(memberships__user=u)
+        self.assertEqual((org.name, org.address), ("Test School", "12 Campus Road, Ibadan"))
+
+    def test_register_needs_every_field(self):
+        for field in ("org_name", "address", "username", "email", "password"):
+            body = {**self.BODY, field: ""}
+            r = APIClient().post("/api/auth/register/", body, format="json")
+            self.assertEqual(r.status_code, 400, field)
+            self.assertIn(field, r.json(), field)
+
+    def test_password_minimum_is_8(self):
+        short = {**self.BODY, "password": "Xk9!mQ2"}          # 7 characters
+        r = APIClient().post("/api/auth/register/", short, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("password", r.json())
 
 
 class TimetableTests(TestCase):

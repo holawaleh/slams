@@ -8,9 +8,8 @@ class Student(TenantModel):
     # Name is stored as written. Institutions order names differently
     # (surname first or last), so splitting it would guess wrong.
     full_name  = models.CharField(max_length=128)
-    # Optional: freshers often have no matric number yet. Unique within
-    # the org once it is set.
-    matric_no  = models.CharField(max_length=32, blank=True)
+    # Required, and unique within the org.
+    matric_no  = models.CharField(max_length=32)
     phone      = models.CharField(max_length=20, blank=True)
     email      = models.EmailField(blank=True)
     short_name = models.CharField(max_length=16, blank=True,

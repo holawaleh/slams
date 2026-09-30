@@ -1,58 +1,74 @@
-﻿import { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
 import ThemeToggle from "./ThemeToggle";
 import "./Layout.css";
 
 const NAV = [
-  { to: "/dashboard",  label: "Overview",   icon: "grid" },
-  { to: "/students",   label: "Students",   icon: "users" },
-  { to: "/cards",      label: "Cards",      icon: "card", admin: true },
-  { to: "/unknown",    label: "New cards",  icon: "alert", admin: true },
-  { to: "/courses",    label: "Courses",    icon: "book" },
-  { to: "/timetable",  label: "Timetable",  icon: "clock" },
-  { to: "/sessions",   label: "Lectures",   icon: "play" },
-  { to: "/attendance", label: "Attendance", icon: "check" },
-  { to: "/devices",    label: "Devices",    icon: "chip", admin: true },
-  { to: "/members",    label: "Team",       icon: "team", admin: true },
+  { to: "/dashboard",  label: "Overview",  icon: "grid" },
+  { to: "/students",   label: "Students",  icon: "users" },
+  { to: "/cards",      label: "Cards",     icon: "card", admin: true },
+  { to: "/courses",    label: "Courses",   icon: "book" },
+  { to: "/timetable",  label: "Timetable", icon: "clock" },
+  { to: "/reports",    label: "Reports",   icon: "chart" },
+  { to: "/settings",   label: "Settings",  icon: "gear" },
 ];
 
-function Icon({ name }) {
+export function Icon({ name, size = 18 }) {
   const common = {
-    width: 18, height: 18, viewBox: "0 0 24 24", fill: "none",
+    width: size, height: size, viewBox: "0 0 24 24", fill: "none",
     stroke: "currentColor", strokeWidth: 2,
-    strokeLinecap: "round", strokeLinejoin: "round",
+    strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true,
   };
   const paths = {
     grid: <><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></>,
     users: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /></>,
     card: <><rect x="1" y="4" width="22" height="16" rx="2" /><line x1="1" y1="10" x2="23" y2="10" /></>,
-    alert: <><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>,
     book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></>,
     clock: <><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>,
-    play: <><circle cx="12" cy="12" r="10" /><polygon points="10 8 16 12 10 16 10 8" /></>,
-    check: <><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
-    chip: <><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /></>,
-    team: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
+    chart: <><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></>,
+    gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></>,
+    logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>,
+    user: <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
+    pin: <><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z" /></>,
   };
   return <svg {...common}>{paths[name]}</svg>;
 }
 
+export function initials(user) {
+  return ((user?.first_name?.[0] || "") + (user?.last_name?.[0] || "")).toUpperCase() ||
+    user?.username?.slice(0, 2).toUpperCase() || "?";
+}
+
+// The sidebar hides itself: on a desktop it sits as a slim strip of icons
+// and slides out while the pointer is over it; on a phone it is a drawer
+// that closes as soon as a page is chosen. Pinning keeps it open.
 export default function Layout() {
   const { user, org, orgs, isAdmin, isPlatformAdmin, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [pinned, setPinned] = useState(() => {
+    try { return localStorage.getItem("sidebarPinned") === "1"; } catch { return false; }
+  });
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => { setOpen(false); setMenu(false); }, [location.pathname]);
+
+  function togglePin() {
+    const next = !pinned;
+    setPinned(next);
+    try { localStorage.setItem("sidebarPinned", next ? "1" : "0"); } catch { /* optional */ }
+  }
 
   const items = NAV.filter((n) => !n.admin || isAdmin);
-  const initials =
-    ((user?.first_name?.[0] || "") + (user?.last_name?.[0] || "")).toUpperCase() ||
-    user?.username?.slice(0, 2).toUpperCase() || "?";
+  const role = isPlatformAdmin ? "platform admin" : org?.role;
+  const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username;
 
   return (
-    <div className="shell">
-      <aside className={"sidebar" + (open ? " open" : "")}>
+    <div className={"shell" + (pinned ? " pinned" : "")}>
+      <aside className={"sidebar" + (open ? " open" : "")} aria-label="Main">
         <div className="brand">
           <div className="brand-mark">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -60,24 +76,40 @@ export default function Layout() {
               <polyline points="4 13 9 18 20 6" />
             </svg>
           </div>
-          <div className="brand-text">
+          <div className="brand-text reveal">
             <strong>SLAMS</strong>
             <span className="faint">{org?.name}</span>
           </div>
+          <button type="button" className={"pin-btn reveal" + (pinned ? " on" : "")}
+                  onClick={togglePin} title={pinned ? "Let the menu hide itself" : "Keep the menu open"}
+                  aria-pressed={pinned}>
+            <Icon name="pin" size={15} />
+          </button>
         </div>
 
         <nav>
           {items.map((n) => (
-            <NavLink key={n.to} to={n.to} onClick={() => setOpen(false)}
-                     className={({ isActive }) =>
-                       "navlink" + (isActive ? " active" : "")}>
+            <NavLink key={n.to} to={n.to} title={n.label}
+                     className={({ isActive }) => "navlink" + (isActive ? " active" : "")}>
               <Icon name={n.icon} />
-              <span>{n.label}</span>
+              <span className="reveal">{n.label}</span>
             </NavLink>
           ))}
         </nav>
 
-        <div className="sidebar-foot faint">{org?.term}</div>
+        <div className="sidebar-foot">
+          <Link to="/settings/profile" className="me" title="Your profile">
+            <span className="avatar">{initials(user)}</span>
+            <span className="me-text reveal">
+              <strong>{name}</strong>
+              <small className="faint">{role}{org?.term ? ` · ${org.term}` : ""}</small>
+            </span>
+          </Link>
+          <button type="button" className="navlink signout" onClick={logout} title="Sign out">
+            <Icon name="logout" />
+            <span className="reveal">Sign out</span>
+          </button>
+        </div>
       </aside>
 
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
@@ -99,23 +131,32 @@ export default function Layout() {
           <ThemeToggle />
 
           <div className="account">
-            <button className="btn-ghost account-btn"
-                    onClick={() => setMenu(!menu)}>
-              <span className="avatar">{initials}</span>
+            <button className="btn-ghost account-btn" onClick={() => setMenu(!menu)}
+                    aria-haspopup="menu" aria-expanded={menu}>
+              <span className="avatar">{initials(user)}</span>
               <span className="account-name">
                 {user?.username}
-                <small className="faint">
-                  {isPlatformAdmin ? "platform admin" : org?.role}
-                </small>
+                <small className="faint">{role}</small>
               </span>
             </button>
 
             {menu && (
               <>
                 <div className="scrim bare" onClick={() => setMenu(false)} />
-                <div className="menu card">
+                <div className="menu card" role="menu">
+                  <div className="menu-head faint">{user?.email || user?.username}</div>
+                  <button className="menu-item" onClick={() => navigate("/settings/profile")}>
+                    Profile
+                  </button>
+                  <button className="menu-item" onClick={() => navigate("/settings/password")}>
+                    Change password
+                  </button>
+                  <button className="menu-item" onClick={() => navigate("/settings")}>
+                    Settings
+                  </button>
                   {orgs.length > 1 && (
                     <>
+                      <div className="menu-sep" />
                       <div className="menu-head faint">Organisation</div>
                       {orgs.map((o) => (
                         <button key={o.slug} className="menu-item"
@@ -127,19 +168,15 @@ export default function Layout() {
                           {o.slug === org?.slug && <span className="pill">current</span>}
                         </button>
                       ))}
-                      <div className="menu-sep" />
                     </>
                   )}
-                  <button className="menu-item"
-                          onClick={() => { setMenu(false); navigate("/settings"); }}>
-                    Settings
-                  </button>
                   {isPlatformAdmin && (
                     <a className="menu-item" target="_blank" rel="noreferrer"
                        href={`${api.defaults.baseURL}/admin/`}>
                       All users &amp; data (Django admin)
                     </a>
                   )}
+                  <div className="menu-sep" />
                   <button className="menu-item danger" onClick={logout}>
                     Sign out
                   </button>

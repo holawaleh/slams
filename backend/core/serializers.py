@@ -1,5 +1,6 @@
-from datetime import time
+from datetime import time, timedelta
 
+from django.utils import timezone
 from rest_framework import serializers
 from .base_serializers import TenantSerializer
 from django.contrib.auth.models import User
@@ -23,6 +24,10 @@ class UserBriefSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ("id", "username", "first_name", "last_name")
+
+
+# How recently a reader must have seen a card for it to be registered.
+CAPTURE_WINDOW = timedelta(minutes=15)
 
 
 def clean_uid(value):
@@ -55,7 +60,6 @@ class StudentSerializer(TenantSerializer):
                   "department", "level", "short_name", "active",
                   "created_at", "cards", "card_uid")
         read_only_fields = ("created_at", "short_name")
-        extra_kwargs = {"matric_no": {"required": False}}
 
     def validate_full_name(self, value):
         value = " ".join(value.split())
@@ -65,9 +69,10 @@ class StudentSerializer(TenantSerializer):
 
     def validate_matric_no(self, value):
         value = value.strip().upper()
-        if value:
-            unique_in_org(self, Student, "matric_no", value,
-                          "A student with this matric number already exists.")
+        if not value:
+            raise serializers.ValidationError("Enter the matric number.")
+        unique_in_org(self, Student, "matric_no", value,
+                      "A student with this matric number already exists.")
         return value
 
     def validate_phone(self, value):
@@ -75,7 +80,9 @@ class StudentSerializer(TenantSerializer):
         if not value:
             return value
         digits = "".join(c for c in value if c.isdigit())
-        if not all(c.isdigit() or c in "+ -()" for c in value)                 or not 7 <= len(digits) <= 15 or "+" in value[1:]:
+        well_formed = (all(c.isdigit() or c in "+ -()" for c in value)
+                       and 7 <= len(digits) <= 15 and "+" not in value[1:])
+        if not well_formed:
             raise serializers.ValidationError(
                 "Enter a phone number, e.g. 08031234567 or +2348031234567.")
         return ("+" if value.startswith("+") else "") + digits
@@ -90,6 +97,18 @@ class StudentSerializer(TenantSerializer):
         if not value.strip():
             return ""
         uid = clean_uid(value)
+        if self.instance is not None and self.instance.cards.filter(
+                uid=uid, active=True).exists():
+            return uid                      # their card already; no change
+        # A card is only registered after one of this school's readers
+        # has actually seen it, so a number cannot be typed in from a
+        # list or guessed. The dashboard captures it from the reader.
+        seen = TapEvent.objects.filter(
+            org=self._org(), uid=uid,
+            received_at__gte=timezone.now() - CAPTURE_WINDOW).exists()
+        if not seen:
+            raise serializers.ValidationError(
+                "Scan the card on one of your readers to register it.")
         card = Card.objects.filter(org=self._org(), uid=uid).select_related(
             "student").first()
         if card is None or not card.active:
@@ -326,14 +345,16 @@ class ClassSessionSerializer(TenantSerializer):
 
 class TapEventSerializer(TenantSerializer):
     device_name  = serializers.CharField(source="device.name", read_only=True)
-    student_name = serializers.CharField(source="student.short_name",
-                                         read_only=True)
+    student_name = serializers.CharField(source="student.full_name",
+                                         read_only=True, default=None)
+    course_code  = serializers.CharField(source="session.course.code",
+                                         read_only=True, default=None)
 
     class Meta:
         model = TapEvent
         fields = ("id", "device", "device_name", "uid", "student",
-                  "student_name", "session", "outcome", "device_outcome",
-                  "tapped_at",
+                  "student_name", "session", "course_code", "outcome",
+                  "device_outcome", "tapped_at",
                   "time_conf", "client_id", "received_at")
         read_only_fields = fields          # the raw log is never edited
 

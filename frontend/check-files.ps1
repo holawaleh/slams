@@ -54,11 +54,16 @@ $expected = @(
   "src/pages/Login.jsx",
   "src/pages/Login.css",
   "src/pages/Overview.jsx",
-  "src/pages/UnknownCards.jsx",
   "src/pages/Students.jsx",
   "src/pages/Courses.jsx",
   "src/pages/Timetable.jsx",
-  "src/pages/Timetable.css"
+  "src/pages/Timetable.css",
+  "src/pages/Cards.jsx",
+  "src/pages/Devices.jsx",
+  "src/pages/Logs.jsx",
+  "src/pages/Reports.jsx",
+  "src/pages/Settings.jsx",
+  "src/components/CardCapture.jsx"
 )
 
 Write-Host ""

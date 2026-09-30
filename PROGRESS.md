@@ -84,6 +84,16 @@ Live: `https://slams-bez9.onrender.com` and `https://slams-chi.vercel.app`
 - [x] Students: search, add, edit, deactivate, per-course attendance
 - [x] Courses: add, edit, lecturer, roster, bulk enrolment
 - [x] Timetable: Mon-Sat 07:00-18:00 week grid, click to add/edit, venues
+- [x] Students: full name, matric (required), phone, dept, level, email;
+      card captured from a reader only (server rejects numbers no reader saw)
+- [x] Cards: usage summary (regular / rarely used / never used / revoked),
+      revoke and restore, full card activity log
+- [x] Reports: per-course attendance, at-risk students, CSV register export
+- [x] Settings: profile, change password, staff with roles, role matrix,
+      readers (added by MAC reader ID), organisation, audit log
+- [x] Sidebar hides to an icon strip; pin to keep open; sign out always visible
+- [x] One reader, one account: MAC-based reader ID, token bound to it
+- [x] `core/test_frontend_contract.py`: every page's requests, per role, plus CORS
 
 ### Timing (server-authoritative)
 - [x] Device clock synced from the backend in ms, half the round trip allowed for
@@ -166,11 +176,7 @@ Not the upload bug — the **offline lecture test**. It exercises the queue, the
 - [ ] Attendance summary table (avoid recomputing percentages per request)
 
 ### Frontend
-- [ ] Cards
-- [ ] Device management, token reveal
 - [ ] Live lecture view (polls with a `since` cursor)
-- [ ] Attendance reports
-- [ ] Team management, invitations
 
 ### Before real deployment
 - [ ] Admin password on the device config portal

@@ -1,4 +1,4 @@
-﻿import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import api, { logout as clearSession } from "./api";
 
 const AuthContext = createContext(null);
@@ -58,6 +58,14 @@ export function AuthProvider({ children }) {
     return me.data;
   }
 
+  // After the user edits their profile or the organisation settings.
+  async function reload() {
+    const { data } = await api.get("/api/me/");
+    setUser(data.user);
+    setOrg(data.current_org);
+    setOrgs(data.organizations || []);
+  }
+
   function logout() {
     setUser(null);
     setOrg(null);
@@ -71,7 +79,7 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider
       value={{ user, org, orgs, loading, isAdmin, isPlatformAdmin,
-               login, register, logout }}
+               login, register, logout, reload }}
     >
       {children}
     </AuthContext.Provider>

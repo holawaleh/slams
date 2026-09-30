@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import api from "../lib/api";
+import { Swipes } from "./Logs";
 import { useList, useDebounced } from "../lib/useList";
 import { PageHead, Loading, Empty, ErrorBox } from "../components/bits";
 import Pager from "../components/Pager";
@@ -32,7 +34,7 @@ function usageOf(c, threshold) {
   return <span className="pill pill-ok">regular</span>;
 }
 
-export default function Cards() {
+function CardList() {
   const [summary, setSummary] = useState(null);
   const [filter, setFilter] = useState({ status: "active" });
   const [query, setQuery] = useState("");
@@ -69,8 +71,6 @@ export default function Cards() {
 
   return (
     <>
-      <PageHead title="Cards" subtitle={summary ? `${summary.total} on record` : null} />
-
       <div className="tiles">
         {TILES.map((t) => (
           <button key={t.key} type="button"
@@ -148,6 +148,27 @@ export default function Cards() {
       </div>
 
       <Pager page={page} setPage={setPage} count={count} />
+    </>
+  );
+}
+
+// Two views of the same cards: what is on record, and every time any
+// card - registered or not - was presented to a reader.
+export default function Cards() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") === "activity" ? "activity" : "cards";
+  return (
+    <>
+      <PageHead title="Cards"
+                subtitle={tab === "cards" ? "Every card on record, and how much it is used"
+                                          : "Every swipe on every reader, newest first"} />
+      <div className="tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "cards"} className={tab === "cards" ? "on" : ""}
+                onClick={() => setParams({})}>Cards</button>
+        <button role="tab" aria-selected={tab === "activity"} className={tab === "activity" ? "on" : ""}
+                onClick={() => setParams({ tab: "activity" })}>Card activity</button>
+      </div>
+      {tab === "cards" ? <CardList /> : <Swipes />}
     </>
   );
 }

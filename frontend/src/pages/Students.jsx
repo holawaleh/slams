@@ -84,6 +84,13 @@ function StudentForm({ student, onClose, onSaved }) {
           {fieldErr("full_name")}
         </div>
 
+        <div className="field">
+          <label htmlFor="matric">Matric number</label>
+          <input id="matric" className="input" required maxLength={32} autoComplete="off"
+                 value={form.matric_no} onChange={set("matric_no")} />
+          {fieldErr("matric_no")}
+        </div>
+
         <div className="form-2">
           <div className="field">
             <label htmlFor="phone">Phone no</label>
@@ -108,24 +115,30 @@ function StudentForm({ student, onClose, onSaved }) {
           <div className="field">
             <label htmlFor="level">Level</label>
             <input id="level" className="input" placeholder="e.g. 200" maxLength={8}
-                   list="level-options" value={form.level} onChange={set("level")} />
-            <datalist id="level-options">
-              {["100", "200", "300", "400", "500", "600", "ND1", "ND2", "HND1", "HND2"]
-                .map((l) => <option key={l} value={l} />)}
-            </datalist>
+                   autoComplete="off" value={form.level} onChange={set("level")} />
             {fieldErr("level")}
           </div>
         </div>
 
         <div className="field">
           <label htmlFor="uid">Card UID</label>
+          {/* Read-only on purpose: a card number is only accepted once a
+              reader has seen the card, and the server checks that too. */}
           <div className="row">
-            <input id="uid" className="input mono" placeholder="Tap Scan, or type it: 0A3F05B2"
-                   maxLength={32} autoComplete="off" spellCheck={false}
-                   value={form.card_uid} onChange={set("card_uid")} />
+            <input id="uid" className="input mono" readOnly tabIndex={-1}
+                   placeholder="Not scanned yet" value={form.card_uid}
+                   aria-describedby="uid-help" />
             {!scanning && (
+              <button type="button" className="btn-solid" style={{ flex: "0 0 auto" }}
+                      onClick={() => setScanning(true)}>
+                {form.card_uid ? "Scan again" : "Scan card"}
+              </button>
+            )}
+            {!scanning && form.card_uid && form.card_uid !== (current?.uid ?? "") && (
               <button type="button" className="btn-ghost" style={{ flex: "0 0 auto" }}
-                      onClick={() => setScanning(true)}>Scan card</button>
+                      onClick={() => setForm({ ...form, card_uid: current?.uid ?? "" })}>
+                Clear
+              </button>
             )}
           </div>
           {scanning && (
@@ -140,17 +153,11 @@ function StudentForm({ student, onClose, onSaved }) {
             </small>
           )}
           {!scanning && !form.card_uid && (
-            <small className="faint" style={{ display: "block", marginTop: 6 }}>
-              Optional now; a card can be registered later from New cards.
+            <small id="uid-help" className="faint" style={{ display: "block", marginTop: 6 }}>
+              Press Scan card, then tap the student's card on a reader. You can
+              also save now and scan the card later by editing the student.
             </small>
           )}
-        </div>
-
-        <div className="field">
-          <label htmlFor="matric">Matric number <span className="faint">(optional)</span></label>
-          <input id="matric" className="input" maxLength={32}
-                 value={form.matric_no} onChange={set("matric_no")} />
-          {fieldErr("matric_no")}
         </div>
 
         {editing && (
@@ -170,7 +177,8 @@ function StudentForm({ student, onClose, onSaved }) {
             <button type="button" className="btn-ghost" onClick={onClose}>
               Cancel
             </button>
-            <button className="btn-solid" disabled={busy || !form.full_name.trim()}>
+            <button className="btn-solid"
+                    disabled={busy || scanning || !form.full_name.trim() || !form.matric_no.trim()}>
               {busy ? "Saving..." : editing ? "Save" : "Add student"}
             </button>
           </div>

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -19,30 +19,34 @@ function Stat({ label, value, to, tone }) {
 }
 
 export default function Overview() {
-  const { org } = useAuth();
+  const { org, isAdmin } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!org) return;
+    // Readers and card counts are for admins only; a lecturer or viewer
+    // gets the parts they are allowed to see instead of an error page.
+    const optional = (p) => p.then((r) => r.data).catch(() => null);
+    const lecturerUp = org.role !== "viewer";
     Promise.all([
-      api.get("/api/organization/"),
-      api.get("/api/devices/"),
-      api.get("/api/taps/unregistered/?page_size=1"),
-      api.get("/api/sessions/?status=open&page_size=5"),
+      api.get("/api/organization/").then((r) => r.data),
+      isAdmin ? optional(api.get("/api/devices/", { params: { active: true } })) : null,
+      isAdmin ? optional(api.get("/api/cards/summary/")) : null,
+      lecturerUp ? optional(api.get("/api/sessions/", { params: { running: true, page_size: 20 } })) : null,
     ])
-      .then(([org, devices, unknown, sessions]) => {
-        const list = devices.data.results || devices.data;
+      .then(([orgData, devices, cards, sessions]) => {
+        const list = devices ? devices.results ?? devices : null;
         setData({
-          org: org.data,
+          org: orgData,
           devices: list,
-          online: list.filter((d) => d.online).length,
-          unknown: unknown.data.count ?? 0,
-          sessions: sessions.data.results || sessions.data,
+          online: list ? list.filter((d) => d.online).length : 0,
+          cards,
+          sessions: sessions ? sessions.results ?? sessions : null,
         });
       })
       .catch(setError);
-  }, [org]);
+  }, [org, isAdmin]);
 
   if (!org)
     return (
@@ -62,18 +66,27 @@ export default function Overview() {
       <div style={{ display: "grid", gap: 14, marginBottom: 24,
                     gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))" }}>
         <Stat label="Students" value={data.org.student_count} to="/students" />
-        <Stat label="Devices online"
-              value={`${data.online} / ${data.devices.length}`}
-              to="/devices"
-              tone={data.devices.length && !data.online ? "bad" : null} />
-        <Stat label="Cards to register" value={data.unknown} to="/unknown"
-              tone={data.unknown ? "warn" : null} />
-        <Stat label="Admin s" value={data.org.member_count} to="/members" />
+        {data.devices && (
+          <Stat label="Readers online"
+                value={`${data.online} / ${data.devices.length}`}
+                to="/settings/devices"
+                tone={data.devices.length && !data.online ? "bad" : null} />
+        )}
+        {data.cards && (
+          <Stat label="Cards unused since issue" value={data.cards.never_used} to="/cards"
+                tone={data.cards.never_used ? "warn" : null} />
+        )}
+        <Stat label="Staff" value={data.org.member_count}
+              to={isAdmin ? "/settings/team" : null} />
       </div>
 
       <div className="card">
         <h3>Lectures in progress</h3>
-        {data.sessions.length === 0 ? (
+        {data.sessions === null ? (
+          <p className="muted" style={{ margin: 0 }}>
+            See <Link to="/timetable">the timetable</Link> for this week's lectures.
+          </p>
+        ) : data.sessions.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>
             No lecture is running right now.
           </p>
@@ -90,7 +103,7 @@ export default function Overview() {
                   <td>{s.present_count}</td>
                   <td>{s.late_count}</td>
                   <td style={{ textAlign: "right" }}>
-                    <Link to={`/sessions/${s.id}`}>View</Link>
+                    <Link to={`/reports/${s.course}`}>Course report</Link>
                   </td>
                 </tr>
               ))}

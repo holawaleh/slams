@@ -75,11 +75,22 @@ AUTHENTICATION_BACKENDS = [
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-     "OPTIONS": {"min_length": 10}},
+     "OPTIONS": {"min_length": 8}},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
     {"NAME": "core.validators.StrongPasswordValidator"},
 ]
+
+# The library default is a 5-minute access token, which made the dashboard
+# renew its session constantly. 30 minutes is still short enough that a
+# leaked access token is soon useless; the refresh token keeps a user
+# signed in for a working week.
+from datetime import timedelta
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "UPDATE_LAST_LOGIN": True,
+}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -127,3 +138,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 import sys
 print(f"[settings] DEBUG={DEBUG} HOSTS={ALLOWED_HOSTS} "
       f"CORS={CORS_ALLOWED_ORIGINS}", file=sys.stderr)
+
+# Tests create many users. The production hasher is deliberately slow
+# (hundreds of milliseconds per password), which made the suite take over
+# an hour. A fast hasher is fine for throwaway test accounts only.
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]

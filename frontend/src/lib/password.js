@@ -1,7 +1,9 @@
-// Kept in step with backend/core/validators.py and the 10-character minimum
+export const MIN_LENGTH = 8;
+
+// Kept in step with backend/core/validators.py and the 8-character minimum
 // in settings.AUTH_PASSWORD_VALIDATORS. The server is the final authority.
 export const PASSWORD_RULES = [
-  { label: "At least 10 characters", test: (p) => p.length >= 10 },
+  { label: `At least ${MIN_LENGTH} characters`, test: (p) => p.length >= MIN_LENGTH },
   { label: "An uppercase letter",    test: (p) => /[A-Z]/.test(p) },
   { label: "A lowercase letter",     test: (p) => /[a-z]/.test(p) },
   { label: "A number",               test: (p) => /[0-9]/.test(p) },

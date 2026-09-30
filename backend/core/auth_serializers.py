@@ -28,13 +28,15 @@ def unique_slug(name):
 
 
 class RegisterSerializer(serializers.Serializer):
-    """Creates a user, their institution, and an owner membership."""
+    """Creates a user, their institution, and an owner membership.
+
+    Sign-up asks only for the school, its address, a username, an email
+    and a password. The owner can add their name later under Settings."""
     username      = serializers.CharField(max_length=150)
-    email         = serializers.EmailField(required=False, allow_blank=True)
-    password      = serializers.CharField(write_only=True, min_length=10)
-    first_name    = serializers.CharField(max_length=64)
-    last_name     = serializers.CharField(max_length=64)
+    email         = serializers.EmailField()
+    password      = serializers.CharField(write_only=True, min_length=8)
     org_name      = serializers.CharField(max_length=128)
+    address       = serializers.CharField(max_length=255)
     country       = serializers.CharField(max_length=64, required=False,
                                           allow_blank=True)
     term          = serializers.CharField(max_length=16, required=False,
@@ -51,13 +53,23 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value):
-        return value.strip().lower() if value else ""
+        return value.strip().lower()
+
+    def validate_org_name(self, value):
+        value = " ".join(value.split())
+        if len(value) < 2:
+            raise serializers.ValidationError("Enter the school's name.")
+        return value
+
+    def validate_address(self, value):
+        value = " ".join(value.split())
+        if len(value) < 5:
+            raise serializers.ValidationError("Enter the school's address.")
+        return value
 
     def validate(self, data):
         probe = User(username=data.get("username", ""),
-                     email=data.get("email", ""),
-                     first_name=data.get("first_name", ""),
-                     last_name=data.get("last_name", ""))
+                     email=data.get("email", ""))
         check_password(data["password"], probe)
         return data
 
@@ -65,12 +77,11 @@ class RegisterSerializer(serializers.Serializer):
     def create(self, validated):
         user = User.objects.create_user(
             username=validated["username"],
-            email=validated.get("email", ""),
-            password=validated["password"],
-            first_name=validated["first_name"],
-            last_name=validated["last_name"])
+            email=validated["email"],
+            password=validated["password"])
         org = Organization.objects.create(
             name=validated["org_name"],
+            address=validated["address"],
             slug=unique_slug(validated["org_name"]),
             country=validated.get("country", ""),
             term=validated.get("term") or "2025/2026-1")
@@ -85,7 +96,7 @@ class AcceptInviteSerializer(serializers.Serializer):
     code       = serializers.CharField(max_length=64)
     username   = serializers.CharField(max_length=150, required=False,
                                        help_text="Required for a new account")
-    password   = serializers.CharField(write_only=True, min_length=10,
+    password   = serializers.CharField(write_only=True, min_length=8,
                                        required=False)
     first_name = serializers.CharField(max_length=64, required=False)
     last_name  = serializers.CharField(max_length=64, required=False)
@@ -152,13 +163,16 @@ class InvitationSerializer(serializers.ModelSerializer):
 
 class MembershipSerializer(serializers.ModelSerializer):
     username   = serializers.CharField(source="user.username", read_only=True)
+    email      = serializers.CharField(source="user.email", read_only=True)
+    last_login = serializers.DateTimeField(source="user.last_login", read_only=True)
     full_name  = serializers.SerializerMethodField()
     org_name   = serializers.CharField(source="org.name", read_only=True)
     org_slug   = serializers.CharField(source="org.slug", read_only=True)
 
     class Meta:
         model = Membership
-        fields = ("id", "user", "username", "full_name", "org", "org_name",
+        fields = ("id", "user", "username", "full_name", "email", "last_login",
+                  "org", "org_name",
                   "org_slug", "role", "is_default", "joined_at")
         read_only_fields = ("user", "org", "joined_at")
 
@@ -173,7 +187,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Organization
-        fields = ("id", "name", "slug", "country", "term", "timezone",
+        fields = ("id", "name", "slug", "address", "country", "term", "timezone",
                   "active", "created_at", "max_devices", "max_students",
                   "member_count", "student_count", "device_count")
         read_only_fields = ("slug", "active", "created_at",

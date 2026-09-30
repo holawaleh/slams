@@ -22,52 +22,93 @@ def owner_of(slug):
 class StudentFormTests(TestCase):
     def setUp(self):
         self.org, self.api = owner_of("uni")
+        self.reader = Device.objects.create(org=self.org, name="R1")
+        self.n = 0
+        self.matric = 0
+
+    def seen(self, uid):
+        """A reader in this school has just read the card."""
+        self.n += 1
+        TapEvent.objects.create(org=self.org, device=self.reader, uid=uid,
+                                outcome="unknown", tapped_at=timezone.now(),
+                                client_id=self.n)
 
     def add(self, **kw):
+        self.matric += 1
         body = {"full_name": "Adeyemi  Holawale", "phone": "0803 123 4567",
                 "department": "Computer Engineering", "level": "400",
-                "email": "Ade@Example.com", **kw}
+                "email": "Ade@Example.com", "matric_no": f"m{self.matric}", **kw}
         return self.api.post("/api/students/", body, format="json")
 
-    def test_add_with_card_binds_it(self):
+    def test_add_with_captured_card_binds_it(self):
+        self.seen("0A3F05B2")
         r = self.add(card_uid="0a:3f:05:b2")
         self.assertEqual(r.status_code, 201, r.content)
         s = Student.objects.get()
         self.assertEqual((s.full_name, s.phone, s.email, s.matric_no),
-                         ("Adeyemi Holawale", "08031234567", "ade@example.com", ""))
-        self.assertEqual(s.short_name, "ADEYEMI HOLAWALE")
-        self.assertEqual(Card.objects.get().uid, "0A3F05B2")
+                         ("Adeyemi Holawale", "08031234567", "ade@example.com", "M1"))
         self.assertEqual(Card.objects.get().student, s)
 
-    def test_matric_is_optional_but_unique_when_given(self):
-        self.assertEqual(self.add().status_code, 201)
-        self.assertEqual(self.add(full_name="Second Person").status_code, 201)
-        self.assertEqual(self.add(full_name="Third", matric_no="m1").status_code, 201)
-        r = self.add(full_name="Fourth", matric_no="M1")
+    def test_typed_card_number_is_refused(self):
+        r = self.add(card_uid="0A3F05B2")
         self.assertEqual(r.status_code, 400)
+        self.assertIn("Scan the card", str(r.json()))
+        self.assertFalse(Student.objects.exists())
+
+    def test_card_seen_only_by_another_school_is_refused(self):
+        other, _ = owner_of("other")
+        dev = Device.objects.create(org=other, name="X")
+        TapEvent.objects.create(org=other, device=dev, uid="0A3F05B2",
+                                outcome="unknown", tapped_at=timezone.now(),
+                                client_id=1)
+        self.assertEqual(self.add(card_uid="0A3F05B2").status_code, 400)
+
+    def test_old_sighting_is_not_enough(self):
+        self.seen("0A3F05B2")
+        TapEvent.objects.update(received_at=timezone.now() - timedelta(hours=1))
+        self.assertEqual(self.add(card_uid="0A3F05B2").status_code, 400)
+
+    def test_matric_is_required_and_unique(self):
+        self.assertEqual(self.add(matric_no="").status_code, 400)
+        self.assertEqual(self.add(matric_no="M100").status_code, 201)
+        self.assertEqual(self.add(full_name="Other", matric_no="m100").status_code, 400)
+
+    def test_student_without_card_can_get_one_later(self):
+        sid = self.add().json()["id"]
+        self.seen("0A3F05B2")
+        r = self.api.patch(f"/api/students/{sid}/", {"card_uid": "0A3F05B2"},
+                           format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(Card.objects.get().student_id, sid)
 
     def test_card_already_taken_is_refused_and_student_not_created(self):
+        self.seen("0A3F05B2")
         self.add(card_uid="0A3F05B2")
         r = self.add(full_name="Other Student", card_uid="0A3F05B2")
         self.assertEqual(r.status_code, 400)
         self.assertIn("Adeyemi Holawale", str(r.json()))
         self.assertEqual(Student.objects.count(), 1)
 
-    def test_previously_unknown_card_is_claimed(self):
-        Card.objects.create(org=self.org, uid="0A3F05B2")   # seen, unassigned
-        self.assertEqual(self.add(card_uid="0A3F05B2").status_code, 201)
-        self.assertEqual(Card.objects.get().student.full_name, "Adeyemi Holawale")
-
     def test_bad_phone_rejected(self):
         self.assertEqual(self.add(phone="call me").status_code, 400)
 
     def test_new_card_on_edit_replaces_the_old(self):
+        self.seen("0A3F05B2")
         sid = self.add(card_uid="0A3F05B2").json()["id"]
+        self.seen("11223344")
         r = self.api.patch(f"/api/students/{sid}/", {"card_uid": "11223344"},
                            format="json")
         self.assertEqual(r.status_code, 200, r.content)
         self.assertFalse(Card.objects.get(uid="0A3F05B2").active)
         self.assertTrue(Card.objects.get(uid="11223344").active)
+
+    def test_saving_without_changing_card_is_fine_later(self):
+        self.seen("0A3F05B2")
+        sid = self.add(card_uid="0A3F05B2").json()["id"]
+        TapEvent.objects.all().delete()
+        r = self.api.patch(f"/api/students/{sid}/", {"card_uid": "0A3F05B2",
+                                                     "level": "500"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
 
     def test_search_and_filter_by_level(self):
         self.add(level="200", full_name="Level Two")
@@ -77,13 +118,6 @@ class StudentFormTests(TestCase):
         rows = self.api.get("/api/students/", {"search": "400"}).json()["results"]
         self.assertEqual([r["full_name"] for r in rows], ["Level Four"])
         self.assertEqual(self.api.get("/api/students/levels/").json(), ["200", "400"])
-
-    def test_search_by_card_number_lists_student_once(self):
-        sid = self.add(card_uid="0A3F05B2").json()["id"]
-        self.api.patch(f"/api/students/{sid}/", {"card_uid": "0A3F05B3"},
-                       format="json")
-        rows = self.api.get("/api/students/", {"search": "0A3F05B"}).json()["results"]
-        self.assertEqual(len(rows), 1)
 
 
 class CaptureTests(TestCase):
@@ -111,7 +145,8 @@ class CaptureTests(TestCase):
         self.assertEqual((out["uid"], out["state"]), ("0A3F05B2", "new"))
 
     def test_reports_a_card_that_is_already_someone_elses(self):
-        s = Student.objects.create(org=self.org, full_name="Taken Person")
+        s = Student.objects.create(org=self.org, full_name="Taken Person",
+                                   matric_no="T1")
         Card.objects.create(org=self.org, uid="0A3F05B2", student=s)
         start = timezone.now() - timedelta(seconds=1)
         self.tap("0A3F05B2", 3)
@@ -133,7 +168,8 @@ class CardSummaryTests(TestCase):
         self.n = 0
 
     def card(self, uid, taps_recent=0, taps_old=0, **kw):
-        s = Student.objects.create(org=self.org, full_name=f"S {uid}")
+        s = Student.objects.create(org=self.org, full_name=f"S {uid}",
+                                   matric_no=uid)
         c = Card.objects.create(org=self.org, uid=uid, student=s, **kw)
         Card.objects.filter(pk=c.pk).update(
             issued_at=timezone.now() - timedelta(days=90))
@@ -246,7 +282,8 @@ class ReportTests(TestCase):
         self.org, self.api = owner_of("uni")
         self.venue = Venue.objects.create(org=self.org, code="LT1", name="LT1")
         self.course = Course.objects.create(org=self.org, code="CSC101", title="x")
-        self.s = [Student.objects.create(org=self.org, full_name=f"Student {i}")
+        self.s = [Student.objects.create(org=self.org, full_name=f"Student {i}",
+                                         matric_no=f"M{i}")
                   for i in range(3)]
         for s in self.s:
             Enrollment.objects.create(org=self.org, student=s, course=self.course,

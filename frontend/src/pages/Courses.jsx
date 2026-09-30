@@ -8,20 +8,23 @@ import Modal from "../components/Modal";
 import Pager from "../components/Pager";
 
 // People who can be put in charge of a course.
-function useLecturers() {
+function useLecturers(enabled) {
   const [people, setPeople] = useState([]);
   useEffect(() => {
+    if (!enabled) return;
     api.get("/api/members/")
        .then(({ data }) => setPeople((data.results ?? data)
          .filter((m) => ["owner", "admin", "lecturer"].includes(m.role))))
        .catch(() => setPeople([]));
-  }, []);
+  }, [enabled]);
   return people;
 }
 
 export function CourseForm({ course, onClose, onSaved, onDeleted }) {
   const editing = !!course;
-  const lecturers = useLecturers();
+  // A new course is created without a lecturer; one can be assigned
+  // afterwards from Edit, once the course exists.
+  const lecturers = useLecturers(editing);
   const [form, setForm] = useState({
     code: course?.code ?? "", title: course?.title ?? "",
     lecturer: course?.lecturer ?? "",
@@ -34,8 +37,8 @@ export function CourseForm({ course, onClose, onSaved, onDeleted }) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const body = { ...form, code: form.code.trim().toUpperCase(),
-                   lecturer: form.lecturer || null };
+    const body = { code: form.code.trim().toUpperCase(), title: form.title };
+    if (editing) body.lecturer = form.lecturer || null;
     try {
       const { data } = editing
         ? await api.patch(`/api/courses/${course.id}/`, body)
@@ -65,14 +68,14 @@ export function CourseForm({ course, onClose, onSaved, onDeleted }) {
     <Modal title={editing ? "Edit course" : "Add course"} onClose={onClose}>
       <form onSubmit={save}>
         <ErrorBox error={error} />
-        <div className="form-2">
+        <div className={editing ? "form-2" : ""}>
           <div className="field">
             <label htmlFor="code">Course code</label>
             <input id="code" className="input" required maxLength={12}
                    autoFocus placeholder="CSC101"
                    value={form.code} onChange={set("code")} />
           </div>
-          <div className="field">
+          {editing && <div className="field">
             <label htmlFor="lect">Lecturer</label>
             <select id="lect" className="input" value={form.lecturer ?? ""}
                     onChange={set("lecturer")}>
@@ -83,7 +86,7 @@ export function CourseForm({ course, onClose, onSaved, onDeleted }) {
                 </option>
               ))}
             </select>
-          </div>
+          </div>}
         </div>
         <div className="field">
           <label htmlFor="title">Title</label>
