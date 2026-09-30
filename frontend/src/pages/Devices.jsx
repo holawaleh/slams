@@ -82,6 +82,12 @@ function AddReader({ onClose, onAdded }) {
     setStep("pair");
   }
 
+  // Venues can arrive after a reader was picked; pre-select one then too.
+  useEffect(() => {
+    if (step === "pair" && venues.length)
+      setForm((f) => (f.venue ? f : { ...f, venue: venues[0].id }));
+  }, [step, venues]);
+
   async function pair(e) {
     e.preventDefault();
     setBusy(true);
@@ -160,6 +166,12 @@ function AddReader({ onClose, onAdded }) {
               {fieldErr(error, "venue")}
             </div>
           </div>
+          {!form.venue && (
+            <div className="alert alert-bad" style={{ marginTop: -6 }}>
+              A reader with no venue never has a lecture: every tap will say
+              &ldquo;No lecture now&rdquo;. Pick the room it is installed in.
+            </div>
+          )}
           <div className="spread">
             <button type="button" className="btn-ghost" onClick={() => { setStep("search"); setError(null); }}>
               Back

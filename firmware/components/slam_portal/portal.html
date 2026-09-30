@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SLAM setup</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--line:#e2e5ea;--ink:#1c2430;--dim:#6b7684;
+      --ok:#1f9254;--warn:#b8860b;--bad:#c0392b;--accent:#2563eb}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;font:15px/1.5 system-ui,-apple-system,sans-serif;
+     background:var(--bg);color:var(--ink)}
+.wrap{max-width:560px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--dim);font-size:13px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+      padding:16px;margin-bottom:14px}
+h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;
+   color:var(--dim);margin:0 0 12px}
+.row{display:flex;justify-content:space-between;align-items:center;
+     padding:9px 0;border-bottom:1px solid var(--line);gap:10px}
+.row:last-child{border-bottom:0}
+.row .name{font-weight:500;overflow:hidden;text-overflow:ellipsis;
+           white-space:nowrap}
+.meta{font-size:12px;color:var(--dim)}
+label{display:block;font-size:13px;color:var(--dim);margin:10px 0 4px}
+input{width:100%;padding:9px 10px;border:1px solid var(--line);
+      border-radius:7px;font-size:15px;background:#fff;color:var(--ink)}
+button{padding:9px 14px;border:0;border-radius:7px;background:var(--accent);
+       color:#fff;font-size:14px;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+button.ghost{background:transparent;color:var(--accent);
+             border:1px solid var(--line)}
+button.danger{background:transparent;color:var(--bad);
+              border:1px solid var(--line);padding:5px 10px;font-size:13px}
+.actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.pill{font-size:11px;padding:2px 8px;border-radius:99px;background:#eef1f5;
+      color:var(--dim)}
+.pill.on{background:#e6f4ec;color:var(--ok)}
+.pill.off{background:#fdeceb;color:var(--bad)}
+.note{font-size:12px;color:var(--dim);margin-top:10px}
+.msg{padding:9px 12px;border-radius:7px;font-size:14px;margin-bottom:12px;
+     display:none}
+.msg.ok{display:block;background:#e6f4ec;color:var(--ok)}
+.msg.err{display:block;background:#fdeceb;color:var(--bad)}
+.scan-item{cursor:pointer}
+.scan-item:hover .name{color:var(--accent)}
+@media(prefers-color-scheme:dark){
+:root{--bg:#14171c;--card:#1c2027;--line:#2c323b;--ink:#e6e9ee;--dim:#98a2b0}
+input{background:#14171c;color:var(--ink)}
+.pill{background:#252b34}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SLAM setup</h1>
+  <div class="sub" id="devline">loading...</div>
+  <div class="msg" id="msg"></div>
+
+  <div class="card">
+    <h2>Status</h2>
+    <div class="row"><span class="name">Network</span>
+      <span><span id="ssid" class="meta">-</span> <span id="link" class="pill">-</span></span></div>
+    <div class="row"><span class="name">IP address</span><span class="meta" id="ip">-</span></div>
+    <div class="row"><span class="name">Queued records</span><span class="meta" id="queue">-</span></div>
+    <div class="row"><span class="name">Cards known</span><span class="meta" id="cards">-</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Saved networks</h2>
+    <div id="saved"><div class="meta">loading...</div></div>
+    <div class="note">Tried in order. Up to five are kept.</div>
+  </div>
+
+  <div class="card">
+    <h2>Add a network</h2>
+    <div class="actions" style="margin:0 0 8px">
+      <button class="ghost" id="scanbtn" onclick="scan()">Scan for networks</button>
+    </div>
+    <div id="scanlist"></div>
+    <label for="ssid_in">Network name</label>
+    <input id="ssid_in" autocapitalize="off" autocomplete="off">
+    <label for="pass_in">Password</label>
+    <input id="pass_in" type="password" autocomplete="off">
+    <div class="actions"><button onclick="addNet()">Save network</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Server</h2>
+    <label for="url_in">Backend address</label>
+    <input id="url_in" placeholder="http://192.168.0.106:8000" autocapitalize="off">
+    <label for="tok_in">Device token</label>
+    <input id="tok_in" placeholder="leave blank to keep the current one"
+           autocomplete="off">
+    <div class="actions"><button onclick="saveServer()">Save server settings</button></div>
+    <div class="note">The token comes from the device record in the dashboard.</div>
+  </div>
+
+  <div class="card">
+    <h2>Device</h2>
+    <div class="actions">
+      <button class="ghost" onclick="reboot()">Restart device</button>
+    </div>
+    <div class="note">Attendance keeps working while you are on this page.
+      Queued taps are not lost by restarting.</div>
+  </div>
+</div>
+
+<script>
+function show(text, ok){
+  var m = document.getElementById('msg');
+  m.textContent = text;
+  m.className = 'msg ' + (ok ? 'ok' : 'err');
+  setTimeout(function(){ m.className = 'msg'; }, 4000);
+}
+function post(path, body){
+  return fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+                      body: JSON.stringify(body || {})}).then(function(r){
+    return r.json().then(function(j){ return {ok:r.ok, body:j}; });
+  });
+}
+function status(){
+  fetch('/api/status').then(function(r){ return r.json(); }).then(function(d){
+    document.getElementById('devline').textContent =
+      d.device + '  -  reader ID ' + d.hw_id + '  -  firmware ' + d.firmware;
+    document.getElementById('ssid').textContent = d.ssid || 'not connected';
+    document.getElementById('ip').textContent = d.ip;
+    document.getElementById('queue').textContent = d.queue;
+    document.getElementById('cards').textContent = d.cards;
+    var l = document.getElementById('link');
+    l.textContent = d.online ? 'online' : 'offline';
+    l.className = 'pill ' + (d.online ? 'on' : 'off');
+    if(!document.getElementById('url_in').value)
+      document.getElementById('url_in').value = d.url;
+    document.getElementById('tok_in').placeholder =
+      d.token_set ? 'set - leave blank to keep it' : 'not set';
+  }).catch(function(){});
+}
+function saved(){
+  fetch('/api/networks').then(function(r){ return r.json(); }).then(function(list){
+    var el = document.getElementById('saved');
+    if(!list.length){ el.innerHTML = '<div class="meta">None saved yet.</div>'; return; }
+    el.innerHTML = list.map(function(n, i){
+      return '<div class="row"><span class="name">' + (i+1) + '. ' +
+             esc(n.ssid) + (n.current ? ' <span class="pill on">in use</span>' : '') +
+             '</span><button class="danger" onclick="rm(\'' +
+             esc(n.ssid).replace(/'/g, "\\'") + '\')">Remove</button></div>';
+    }).join('');
+  });
+}
+function esc(s){
+  return String(s).replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; });
+}
+function scan(){
+  var b = document.getElementById('scanbtn');
+  b.disabled = true; b.textContent = 'Scanning...';
+  fetch('/api/scan').then(function(r){ return r.json(); }).then(function(list){
+    var el = document.getElementById('scanlist');
+    el.innerHTML = list.map(function(n){
+      return '<div class="row scan-item" onclick="pick(\'' +
+             esc(n.ssid).replace(/'/g, "\\'") + '\')"><span class="name">' +
+             esc(n.ssid) + (n.saved ? ' <span class="pill">saved</span>' : '') +
+             '</span><span class="meta">' + n.rssi + ' dBm' +
+             (n.secure ? '' : ' - open') + '</span></div>';
+    }).join('') || '<div class="meta">Nothing found.</div>';
+  }).catch(function(){ show('Scan failed.', false); })
+  .then(function(){ b.disabled = false; b.textContent = 'Scan for networks'; });
+}
+function pick(s){
+  document.getElementById('ssid_in').value = s;
+  document.getElementById('pass_in').focus();
+}
+function addNet(){
+  var ssid = document.getElementById('ssid_in').value.trim();
+  if(!ssid){ show('Enter a network name.', false); return; }
+  post('/api/connect', {ssid:ssid, pass:document.getElementById('pass_in').value})
+    .then(function(r){
+      show(r.body.detail, r.ok);
+      if(r.ok){ document.getElementById('pass_in').value = ''; saved(); }
+    });
+}
+function rm(ssid){
+  if(!confirm('Remove ' + ssid + '?')) return;
+  post('/api/remove', {ssid:ssid}).then(function(r){
+    show(r.body.detail, r.ok); saved(); });
+}
+function saveServer(){
+  post('/api/server', {url:document.getElementById('url_in').value.trim(),
+                       token:document.getElementById('tok_in').value.trim()})
+    .then(function(r){
+      show(r.body.detail, r.ok);
+      if(r.ok) document.getElementById('tok_in').value = '';
+      status();
+    });
+}
+function reboot(){
+  if(!confirm('Restart the device now?')) return;
+  post('/api/reboot').then(function(){ show('Restarting...', true); });
+}
+status(); saved();
+setInterval(status, 5000);
+</script>
+</body>
+</html>

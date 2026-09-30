@@ -77,3 +77,46 @@
   gap:8px;margin-bottom:16px;
 }
 @media (max-width:560px){.venue-add{grid-template-columns:1fr 1fr}}
+
+/* Horizontal layout: one row per day, hours across. */
+.tth{
+  display:grid;
+  grid-template-columns:110px 1fr;
+  min-width:920px;
+}
+.tth-corner{border-bottom:1px solid var(--line)}
+.tth-hours{
+  position:relative;height:36px;
+  border-bottom:1px solid var(--line);
+}
+.tth-hours span{
+  position:absolute;bottom:8px;transform:translateX(-50%);
+  font-size:11px;color:var(--ink-faint);font-variant-numeric:tabular-nums;
+}
+.tth-hours span:first-child{transform:none}
+.tth-hours .tth-end{right:0;transform:none}
+.tth-row{display:contents}
+.tth-day{
+  display:flex;align-items:center;padding:0 14px;
+  font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--ink-faint);
+  border-bottom:1px solid var(--line-soft);
+}
+.tth-track{
+  position:relative;
+  border-bottom:1px solid var(--line-soft);
+  border-left:1px solid var(--line-soft);
+  /* hour lines, and fainter half-hour lines */
+  background-image:
+    linear-gradient(to right,var(--line-soft) 1px,transparent 1px),
+    linear-gradient(to right,transparent calc(50% - .5px),
+                    color-mix(in srgb,var(--line-soft) 45%,transparent) calc(50% - .5px),
+                    color-mix(in srgb,var(--line-soft) 45%,transparent) calc(50% + .5px),
+                    transparent calc(50% + .5px));
+  background-size:calc(100% / var(--hours)) 100%;
+}
+.tth-track.editable{cursor:copy}
+.tth-track.editable:hover{background-color:color-mix(in srgb,var(--accent) 4%,transparent)}
+.tth .tt-slot{justify-content:center}
+.tth .tt-slot span{font-size:11.5px}
+

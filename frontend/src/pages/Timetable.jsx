@@ -10,7 +10,7 @@ import "./Timetable.css";
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const FIRST_HOUR = 7;
 const LAST_HOUR = 18;
-const HOUR_PX = 60;
+const LANE_PX = 58;          // height of one row of lectures within a day
 const STEP_MIN = 15;
 
 const toMin = (t) => {
@@ -306,8 +306,9 @@ export default function Timetable() {
   function clickDay(e, day) {
     if (!isAdmin || e.target !== e.currentTarget) return;
     if (!venues.length || !courses.length) return;
-    const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
-    let start = FIRST_HOUR * 60 + Math.floor((y / HOUR_PX) * 2) * 30;
+    const box = e.currentTarget.getBoundingClientRect();
+    const frac = (e.clientX - box.left) / box.width;
+    let start = FIRST_HOUR * 60 + Math.floor(frac * (LAST_HOUR - FIRST_HOUR) * 2) * 30;
     start = Math.min(start, LAST_HOUR * 60 - 60);
     setEditing({ draft: {
       weekday: day, start_time: toHHMM(start), end_time: toHHMM(start + 60),
@@ -371,49 +372,54 @@ export default function Timetable() {
         <div className="card"><Empty message="No lectures on the timetable yet." /></div>
       ) : (
         <div className="card tt-card">
-          <div className="tt" style={{ "--hour": `${HOUR_PX}px`,
-                                       "--hours": LAST_HOUR - FIRST_HOUR }}>
-            <div className="tt-corner" />
-            {DAYS.map((d) => (
-              <div key={d} className="tt-dayhead">
-                <span className="tt-long">{d}</span>
-                <span className="tt-short">{d.slice(0, 3)}</span>
-              </div>
-            ))}
-
-            <div className="tt-axis">
+          {/* Days down the side, the teaching day across. */}
+          <div className="tth" style={{ "--hours": LAST_HOUR - FIRST_HOUR }}>
+            <div className="tth-corner" />
+            <div className="tth-hours">
               {hours.map((h) => (
-                <div key={h} className="tt-hour">{toHHMM(h * 60)}</div>
+                <span key={h} style={{ left: `${((h - FIRST_HOUR) / (LAST_HOUR - FIRST_HOUR)) * 100}%` }}>
+                  {toHHMM(h * 60)}
+                </span>
               ))}
-              <div className="tt-hour tt-last">{toHHMM(LAST_HOUR * 60)}</div>
+              <span className="tth-end">{toHHMM(LAST_HOUR * 60)}</span>
             </div>
 
-            {byDay.map((items, d) => (
-              <div key={d} className={"tt-day" + (isAdmin && !missing ? " editable" : "")}
-                   onClick={(e) => clickDay(e, d)}>
-                {items.map(({ slot: s, lane, lanes }) => {
-                  const top = (toMin(s.start_time) - FIRST_HOUR * 60) / 60 * HOUR_PX;
-                  const height = (toMin(s.end_time) - toMin(s.start_time)) / 60 * HOUR_PX;
-                  return (
-                    <button key={s.id} type="button" className="tt-slot"
-                            disabled={!isAdmin}
-                            title={`${s.course_code} · ${s.course_title}\n${s.start_time.slice(0, 5)}-${s.end_time.slice(0, 5)} · ${s.venue_code}${s.lecturer_name ? `\n${s.lecturer_name}` : ""}`}
-                            style={{
-                              top, height: height - 2,
-                              left: `calc(${(100 / lanes) * lane}% + 2px)`,
-                              width: `calc(${100 / lanes}% - 4px)`,
-                              "--h": hue(s.course_code),
-                            }}
-                            onClick={() => setEditing({ slot: s })}>
-                      <strong>{s.course_code}</strong>
-                      <span>{s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)}</span>
-                      {height >= 58 && <span>{s.venue_code}</span>}
-                      {height >= 78 && s.lecturer_name && <span className="tt-who">{s.lecturer_name}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
+            {byDay.map((items, d) => {
+              const lanes = Math.max(1, ...items.map((i) => i.lanes));
+              return (
+                <div key={d} className="tth-row">
+                  <div className="tth-day">
+                    <span className="tt-long">{DAYS[d]}</span>
+                    <span className="tt-short">{DAYS[d].slice(0, 3)}</span>
+                  </div>
+                  <div className={"tth-track" + (isAdmin && !missing ? " editable" : "")}
+                       style={{ height: lanes * LANE_PX + 8 }}
+                       onClick={(e) => clickDay(e, d)}>
+                    {items.map(({ slot: s, lane }) => {
+                      const span = (LAST_HOUR - FIRST_HOUR) * 60;
+                      const left = (toMin(s.start_time) - FIRST_HOUR * 60) / span * 100;
+                      const width = (toMin(s.end_time) - toMin(s.start_time)) / span * 100;
+                      return (
+                        <button key={s.id} type="button" className="tt-slot"
+                                disabled={!isAdmin}
+                                title={`${s.course_code} · ${s.course_title}\n${s.start_time.slice(0, 5)}-${s.end_time.slice(0, 5)} · ${s.venue_code}${s.lecturer_name ? `\n${s.lecturer_name}` : ""}`}
+                                style={{
+                                  left: `calc(${left}% + 2px)`,
+                                  width: `calc(${width}% - 4px)`,
+                                  top: lane * LANE_PX + 4,
+                                  height: LANE_PX - 4,
+                                  "--h": hue(s.course_code),
+                                }}
+                                onClick={() => setEditing({ slot: s })}>
+                          <strong>{s.course_code}</strong>
+                          <span>{s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)} · {s.venue_code}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
