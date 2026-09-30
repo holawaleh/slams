@@ -1,4 +1,4 @@
-﻿.auth-page{
+.auth-page{
   min-height:100vh;
   display:flex;
   align-items:center;
@@ -31,16 +31,5 @@
 
 .auth-sub{margin:0 0 26px;font-size:14px}
 
-.reveal{
-  width:46px;
-  padding:0;
-  border:0;
-  border-left:1.5px solid var(--line);
-  border-radius:0;
-  background:transparent;
-  color:var(--ink-dim);
-  flex-shrink:0;
-}
-.reveal:hover{background:var(--card-hover)}
 
 .auth-links{margin-top:16px;font-size:14px}

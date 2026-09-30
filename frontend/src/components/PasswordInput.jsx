@@ -16,7 +16,7 @@ export default function PasswordInput({ id, value, onChange, autoComplete,
       <input id={id} type={show ? "text" : "password"} value={value}
              autoComplete={autoComplete} onChange={onChange}
              aria-invalid={invalid || undefined} {...rest} />
-      <button type="button" className="reveal" onClick={() => setShow(!show)}
+      <button type="button" className="pw-toggle" onClick={() => setShow(!show)}
               aria-label={show ? "Hide password" : "Show password"}
               title={show ? "Hide password" : "Show password"}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"

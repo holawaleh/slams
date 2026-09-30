@@ -16,9 +16,9 @@
 .sidebar:hover,.sidebar:focus-within{box-shadow:var(--shadow)}
 .shell.pinned .sidebar{box-shadow:none}
 
-.reveal{opacity:0;transition:opacity .12s ease;white-space:nowrap}
-.sidebar:hover .reveal,.sidebar:focus-within .reveal,
-.shell.pinned .reveal,.sidebar.open .reveal{opacity:1}
+.sb-label{opacity:0;transition:opacity .12s ease;white-space:nowrap}
+.sidebar:hover .sb-label,.sidebar:focus-within .sb-label,
+.shell.pinned .sb-label,.sidebar.open .sb-label{opacity:1}
 
 .brand{display:flex;align-items:center;gap:11px;padding:16px 14px;
        border-bottom:1px solid var(--line);min-height:69px}
@@ -89,7 +89,7 @@
 .scrim.bare{background:transparent;z-index:50}
 
 @media (prefers-reduced-motion:reduce){
-  .sidebar,.main,.reveal{transition:none}
+  .sidebar,.main,.sb-label{transition:none}
 }
 
 /* Phones: no strip at all. The menu button opens a drawer. */

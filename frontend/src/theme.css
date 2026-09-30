@@ -335,3 +335,15 @@ tr.clickable{cursor:pointer}
 .matrix .mine{background:var(--accent-ghost)}
 .matrix .yes{color:var(--ok);font-weight:700}
 .matrix .no{color:var(--ink-faint)}
+
+/* Show/hide button inside a password field. Global, because password
+   fields appear on the sign-in pages and in Settings. */
+.pw-toggle{
+  width:46px;padding:0;
+  border:0;border-left:1.5px solid var(--line);border-radius:0;
+  background:transparent;color:var(--ink-dim);
+  flex-shrink:0;cursor:pointer;
+}
+.pw-toggle:hover:not(:disabled){background:var(--card-hover);color:var(--ink)}
+.pw-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+

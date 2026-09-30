@@ -76,11 +76,11 @@ export default function Layout() {
               <polyline points="4 13 9 18 20 6" />
             </svg>
           </div>
-          <div className="brand-text reveal">
+          <div className="brand-text sb-label">
             <strong>SLAMS</strong>
             <span className="faint">{org?.name}</span>
           </div>
-          <button type="button" className={"pin-btn reveal" + (pinned ? " on" : "")}
+          <button type="button" className={"pin-btn sb-label" + (pinned ? " on" : "")}
                   onClick={togglePin} title={pinned ? "Let the menu hide itself" : "Keep the menu open"}
                   aria-pressed={pinned}>
             <Icon name="pin" size={15} />
@@ -92,7 +92,7 @@ export default function Layout() {
             <NavLink key={n.to} to={n.to} title={n.label}
                      className={({ isActive }) => "navlink" + (isActive ? " active" : "")}>
               <Icon name={n.icon} />
-              <span className="reveal">{n.label}</span>
+              <span className="sb-label">{n.label}</span>
             </NavLink>
           ))}
         </nav>
@@ -100,14 +100,14 @@ export default function Layout() {
         <div className="sidebar-foot">
           <Link to="/settings/profile" className="me" title="Your profile">
             <span className="avatar">{initials(user)}</span>
-            <span className="me-text reveal">
+            <span className="me-text sb-label">
               <strong>{name}</strong>
               <small className="faint">{role}{org?.term ? ` · ${org.term}` : ""}</small>
             </span>
           </Link>
           <button type="button" className="navlink signout" onClick={logout} title="Sign out">
             <Icon name="logout" />
-            <span className="reveal">Sign out</span>
+            <span className="sb-label">Sign out</span>
           </button>
         </div>
       </aside>
