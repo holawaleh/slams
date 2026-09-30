@@ -1,7 +1,15 @@
-from django.db.models import Count, Q, Max, ProtectedError
+from datetime import timedelta, timezone as dt_timezone
+
+import django_filters
+from django.db import transaction
+from django.db.models import (Count, IntegerField, Max, OuterRef, Q,
+                              ProtectedError, Subquery, Value)
+from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .models import (Student, Card, Venue, Course, Enrollment, Device,
@@ -12,7 +20,8 @@ from .serializers import (StudentSerializer, CardSerializer, VenueSerializer,
                           DeviceSerializer, TimetableSlotSerializer,
                           ClassSessionSerializer, TapEventSerializer,
                           AttendanceRecordSerializer, AuditLogSerializer,
-                          BindCardSerializer)
+                          BindCardSerializer, clean_uid)
+from .reports import held_sessions, local_day_range
 from .permissions import (TenantScopedMixin, IsOrgAdmin, IsOrgAdminOrReadOnly,
                           IsLecturerOrAdmin, get_membership)
 from .pagination import StandardPagination, LargePagination
@@ -45,47 +54,126 @@ def audit(request, action_name, detail):
         action=action_name, detail=detail, ip=client_ip(request))
 
 
+def bind_card(request, org, uid, student, replace=False):
+    """Give a card to a student. The one place a card is ever bound, so
+    the rules and the audit trail are the same from every screen.
+
+    replace revokes the student's other active cards: a lost or broken
+    card is replaced without losing the attendance it recorded."""
+    card = Card.objects.filter(org=org, uid=uid).select_related("student").first()
+    if card and card.active:
+        if card.is_admin:
+            raise ValidationError({"card_uid": "That is an admin card."})
+        if card.student_id and card.student_id != student.id:
+            raise ValidationError({"card_uid":
+                f"That card is already registered to {card.student.full_name}."})
+
+    if replace:
+        for old in Card.objects.filter(org=org, student=student,
+                                       active=True).exclude(uid=uid):
+            old.active = False
+            old.revoked_at = timezone.now()
+            old.save(update_fields=["active", "revoked_at"])
+            audit(request, "card_revoke",
+                  f"uid={old.uid} replaced for {student_label(student)}")
+
+    if card is None:
+        card = Card.objects.create(org=org, uid=uid, student=student)
+    else:
+        card.student, card.is_admin, card.active = student, False, True
+        card.revoked_at = None
+        card.save()
+    audit(request, "card_bind", f"uid={uid} -> {student_label(student)}")
+    return card
+
+
+def student_label(student):
+    if student.matric_no:
+        return f"{student.full_name} ({student.matric_no})"
+    return student.full_name
+
+
+class StudentFilter(django_filters.FilterSet):
+    # "Has a card" is the question a registrar actually asks.
+    has_card = django_filters.BooleanFilter(method="filter_has_card")
+
+    class Meta:
+        model = Student
+        fields = ["active", "department", "level"]
+
+    def filter_has_card(self, qs, name, value):
+        with_card = Q(cards__active=True)
+        return (qs.filter(with_card) if value else qs.exclude(with_card)).distinct()
+
+
 class StudentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     queryset = Student.objects.prefetch_related("cards").all()
     serializer_class = StudentSerializer
     permission_classes = [IsOrgAdminOrReadOnly]
     pagination_class = StandardPagination
-    filterset_fields = ["active", "department", "level"]
-    search_fields = ["matric_no", "first_name", "last_name"]
-    ordering_fields = ["matric_no", "last_name", "created_at"]
-    ordering = ["matric_no"]
+    filterset_class = StudentFilter
+    search_fields = ["full_name", "matric_no", "phone", "email", "level",
+                     "department", "cards__uid"]
+    ordering_fields = ["full_name", "matric_no", "level", "created_at"]
+    ordering = ["full_name"]
+
+    def get_queryset(self):
+        # Searching on cards__uid joins cards, which would repeat a
+        # student once per card they have ever held.
+        qs = super().get_queryset()
+        return qs.distinct() if self.request.query_params.get("search") else qs
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        uid = serializer.validated_data.get("card_uid")
+        student = serializer.save()
+        audit(self.request, "student_create", student_label(student))
+        if uid:
+            bind_card(self.request, self.org, uid, student)
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        uid = serializer.validated_data.get("card_uid")
+        student = serializer.save()
+        audit(self.request, "student_update", student_label(student))
+        if uid and not student.cards.filter(uid=uid, active=True).exists():
+            bind_card(self.request, self.org, uid, student, replace=True)
 
     def destroy(self, request, *args, **kwargs):
         return destroy_or_conflict(self, request, "student")
 
+    @action(detail=False)
+    def levels(self, request):
+        """Levels in use, for the filter list."""
+        values = (Student.objects.filter(org=self.org).exclude(level="")
+                  .values_list("level", flat=True).distinct())
+        return Response(sorted(set(values), key=lambda v: (len(v), v)))
+
     @action(detail=True)
     def attendance(self, request, pk=None):
-        """Attendance percentage per course for one student."""
+        """Attendance per course for one student, against the lectures
+        that have actually taken place."""
         student = self.get_object()
         rows = list(AttendanceRecord.objects
                 .filter(student=student)
-                .values("session__course__code")
+                .values("session__course_id", "session__course__code")
                 .annotate(attended=Count("id"),
                           present=Count("id", filter=Q(status="present")),
                           late=Count("id", filter=Q(status="late")))
                 .order_by("session__course__code"))
 
         # One query for every course's held-session count, instead of one
-        # query per row - this used to be an N+1 as the course list grew.
-        codes = [r["session__course__code"] for r in rows]
-        held_map = dict(ClassSession.objects
-                         .filter(org=self.org, course__code__in=codes,
-                                 status="closed")
-                         .values("course__code")
-                         .annotate(held=Count("id"))
-                         .values_list("course__code", "held"))
+        # query per row.
+        held_map = dict(held_sessions(self.org)
+                        .filter(course_id__in=[r["session__course_id"] for r in rows])
+                        .values("course_id").annotate(held=Count("id"))
+                        .values_list("course_id", "held"))
 
         out = []
         for r in rows:
-            code = r["session__course__code"]
-            held = held_map.get(code, 0)
+            held = held_map.get(r["session__course_id"], 0)
             out.append({
-                "course": code, "sessions_held": held,
+                "course": r["session__course__code"], "sessions_held": held,
                 "attended": r["attended"], "present": r["present"],
                 "late": r["late"],
                 "percentage": round(100 * r["attended"] / held, 1) if held else None,
@@ -93,13 +181,71 @@ class StudentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         return Response(out)
 
 
+# A card used fewer times than this in the last 30 days is "rarely used".
+RARE_USES_30D = 3
+
+
+def card_usage(qs):
+    """Annotate cards with when and how often they have been tapped since
+    they were issued. Taps are matched by UID within the same org; taps
+    from before the card was issued (while it was still unknown) do not
+    count as use."""
+    since_issue = TapEvent.objects.filter(
+        org=OuterRef("org"), uid=OuterRef("uid"),
+        tapped_at__gte=OuterRef("issued_at"))
+
+    def count(q):
+        return Coalesce(Subquery(q.values("uid").annotate(n=Count("id"))
+                                 .values("n")[:1], output_field=IntegerField()),
+                        Value(0))
+
+    month_ago = timezone.now() - timedelta(days=30)
+    return qs.annotate(
+        last_used=Subquery(since_issue.order_by("-tapped_at")
+                           .values("tapped_at")[:1]),
+        uses_total=count(since_issue),
+        uses_30d=count(since_issue.filter(tapped_at__gte=month_ago)))
+
+
+class CardFilter(django_filters.FilterSet):
+    status = django_filters.ChoiceFilter(
+        choices=[("active", "Active"), ("revoked", "Revoked"),
+                 ("unassigned", "Unassigned")], method="filter_status")
+    usage = django_filters.ChoiceFilter(
+        choices=[("never", "Never used"), ("rare", "Rarely used"),
+                 ("regular", "Regular")], method="filter_usage")
+
+    class Meta:
+        model = Card
+        fields = ["is_admin", "student"]
+
+    def filter_status(self, qs, name, value):
+        if value == "active":
+            return qs.filter(active=True)
+        if value == "revoked":
+            return qs.filter(active=False)
+        return qs.filter(active=True, student__isnull=True, is_admin=False)
+
+    def filter_usage(self, qs, name, value):
+        if value == "never":
+            return qs.filter(uses_total=0)
+        if value == "rare":
+            return qs.filter(uses_total__gt=0, uses_30d__lt=RARE_USES_30D)
+        return qs.filter(uses_30d__gte=RARE_USES_30D)
+
+
 class CardViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     queryset = Card.objects.select_related("student", "holder").all()
     serializer_class = CardSerializer
     permission_classes = [IsOrgAdmin]
     pagination_class = StandardPagination
-    filterset_fields = ["active", "is_admin", "student"]
-    search_fields = ["uid", "student__matric_no", "student__last_name"]
+    filterset_class = CardFilter
+    search_fields = ["uid", "student__matric_no", "student__full_name"]
+    ordering_fields = ["issued_at", "last_used", "uses_30d", "uid"]
+    ordering = ["-issued_at"]
+
+    def get_queryset(self):
+        return card_usage(super().get_queryset())
 
     def perform_create(self, serializer):
         card = serializer.save()
@@ -108,6 +254,9 @@ class CardViewSet(TenantScopedMixin, viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         card = serializer.save()
+        if card.active and card.revoked_at:
+            card.revoked_at = None
+            card.save(update_fields=["revoked_at"])
         audit(self.request, "card_update",
               f"uid={card.uid} student={card.student_id} active={card.active}")
 
@@ -118,42 +267,101 @@ class CardViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         instance.save()
         audit(self.request, "card_revoke", f"uid={instance.uid}")
 
+    @action(detail=False)
+    def summary(self, request):
+        """Counts for the Cards page header."""
+        rows = card_usage(Card.objects.filter(org=self.org)).values_list(
+            "active", "is_admin", "student_id", "uses_total", "uses_30d")
+        out = {"total": 0, "active": 0, "revoked": 0, "admin": 0,
+               "unassigned": 0, "never_used": 0, "rarely_used": 0,
+               "regular": 0, "rare_threshold": RARE_USES_30D}
+        for active, is_admin, student, total, month in rows:
+            out["total"] += 1
+            if not active:
+                out["revoked"] += 1
+                continue
+            out["active"] += 1
+            if is_admin:
+                out["admin"] += 1
+            elif not student:
+                out["unassigned"] += 1
+            if total == 0:
+                out["never_used"] += 1
+            elif month < RARE_USES_30D:
+                out["rarely_used"] += 1
+            else:
+                out["regular"] += 1
+        return Response(out)
+
+    @action(detail=False)
+    def capture(self, request):
+        """The card most recently tapped on one reader since a moment in
+        time. The dashboard polls this while waiting for a card to be
+        swiped, so the number never has to be typed.
+
+        The reader uploads every tap, known or not, within seconds, so
+        this needs nothing special from the firmware. received_at is the
+        server's clock, so the reader's clock does not matter here."""
+        device = Device.objects.filter(
+            org=self.org, active=True,
+            pk=request.query_params.get("device") or 0).first()
+        since = parse_datetime(request.query_params.get("since", "") or "")
+        if device is None or since is None:
+            return Response({"detail": "device and since are required."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if timezone.is_naive(since):
+            since = since.replace(tzinfo=dt_timezone.utc)
+
+        tap = (TapEvent.objects.filter(org=self.org, device=device,
+                                       received_at__gt=since)
+               .order_by("-received_at").first())
+        online = bool(device.last_seen and
+                      device.last_seen > timezone.now() - timedelta(minutes=5))
+        if tap is None:
+            return Response({"uid": None, "device_online": online})
+
+        card = Card.objects.filter(org=self.org, uid=tap.uid).select_related(
+            "student").first()
+        if card is None:
+            state, who = "new", None
+        elif not card.active:
+            state, who = "revoked", None
+        elif card.is_admin:
+            state, who = "admin", None
+        elif card.student_id:
+            state, who = "taken", card.student.full_name
+        else:
+            state, who = "unassigned", None
+        return Response({"uid": tap.uid, "seen_at": tap.received_at,
+                         "state": state, "student": who,
+                         "student_id": card.student_id if card else None,
+                         "device_online": online})
+
     @action(detail=False, methods=["post"])
     def bind(self, request):
         """Attach a seen-but-unregistered UID to a student."""
         s = BindCardSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        uid = s.validated_data["uid"].strip().upper()
+        try:
+            uid = clean_uid(s.validated_data["uid"])
+        except ValidationError as e:
+            return Response({"uid": e.detail}, status=status.HTTP_400_BAD_REQUEST)
         try:
             student = Student.objects.get(org=self.org, pk=s.validated_data["student_id"])
         except Student.DoesNotExist:
             return Response({"detail": "No such student."},
                             status=status.HTTP_404_NOT_FOUND)
-
-        if s.validated_data["replace"]:
-            old = Card.objects.filter(org=self.org, student=student, active=True)
-            for c in old:
-                c.active = False
-                c.revoked_at = timezone.now()
-                c.save()
-                audit(request, "card_revoke",
-                      f"uid={c.uid} replaced for {student.matric_no}")
-
-        card, created = Card.objects.get_or_create(
-            org=self.org, uid=uid, defaults={"student": student})
-        if not created:
-            if card.student_id and card.student_id != student.id:
-                return Response(
-                    {"detail": f"UID already bound to {card.student}."},
-                    status=status.HTTP_409_CONFLICT)
-            card.student = student
-            card.active = True
-            card.revoked_at = None
-            card.save()
-
-        audit(request, "card_bind", f"uid={uid} -> {student.matric_no}")
+        existed = Card.objects.filter(org=self.org, uid=uid).exists()
+        try:
+            with transaction.atomic():
+                card = bind_card(request, self.org, uid, student,
+                                 s.validated_data["replace"])
+        except ValidationError as e:
+            return Response({"detail": e.detail["card_uid"]},
+                            status=status.HTTP_409_CONFLICT)
         return Response(CardSerializer(card).data,
-                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+                        status=status.HTTP_200_OK if existed
+                        else status.HTTP_201_CREATED)
 
 
 class VenueViewSet(TenantScopedMixin, viewsets.ModelViewSet):
@@ -198,8 +406,7 @@ class EnrollmentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     permission_classes = [IsOrgAdminOrReadOnly]
     pagination_class = LargePagination
     filterset_fields = ["course", "student", "term"]
-    search_fields = ["student__matric_no", "student__first_name",
-                     "student__last_name"]
+    search_fields = ["student__matric_no", "student__full_name"]
     ordering = ["student__matric_no"]
 
     @action(detail=False, methods=["post"])
@@ -230,7 +437,36 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     serializer_class = DeviceSerializer
     permission_classes = [IsOrgAdmin]
     filterset_fields = ["active", "venue", "enroll_mode"]
-    search_fields = ["name"]
+    search_fields = ["name", "hardware_id"]
+    ordering = ["name"]
+
+    def perform_create(self, serializer):
+        active = Device.objects.filter(org=self.org, active=True).count()
+        if active >= self.org.max_devices:
+            raise ValidationError({"detail":
+                f"Your plan allows {self.org.max_devices} readers. "
+                f"Remove one first."})
+        device = serializer.save()
+        audit(self.request, "device_add", f"{device.name} {device.hardware_id}")
+
+    def perform_update(self, serializer):
+        device = serializer.save()
+        audit(self.request, "device_update",
+              f"{device.name} {device.hardware_id}")
+
+    def perform_destroy(self, instance):
+        """Removing a reader frees its hardware id so another account can
+        add it, and replaces its token so it stops working here. The row
+        stays, because every tap it ever recorded points at it."""
+        import secrets
+        hw = instance.hardware_id
+        instance.active = False
+        instance.hardware_id = None
+        instance.token = secrets.token_urlsafe(32)
+        instance.name = (f"{instance.name} (removed "
+                         f"{timezone.now():%Y-%m-%d %H:%M})")[:64]
+        instance.save()
+        audit(self.request, "device_remove", f"{instance.name} {hw}")
 
     @action(detail=True, methods=["post"])
     def reveal_token(self, request, pk=None):
@@ -343,14 +579,43 @@ class ClassSessionViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         })
 
 
+class TapEventFilter(django_filters.FilterSet):
+    """Dates are the institution's calendar days, not UTC days."""
+    date_from = django_filters.DateFilter(method="filter_from")
+    date_to   = django_filters.DateFilter(method="filter_to")
+    counted   = django_filters.BooleanFilter(method="filter_counted")
+
+    class Meta:
+        model = TapEvent
+        fields = ["device", "outcome", "session", "student", "time_conf"]
+
+    def filter_from(self, qs, name, value):
+        start, _ = local_day_range(get_membership(self.request).org, value, value)
+        return qs.filter(tapped_at__gte=start)
+
+    def filter_to(self, qs, name, value):
+        _, end = local_day_range(get_membership(self.request).org, value, value)
+        return qs.filter(tapped_at__lt=end)
+
+    def filter_counted(self, qs, name, value):
+        q = Q(outcome__in=["present", "late"])
+        return qs.filter(q) if value else qs.exclude(q)
+
+
 class TapEventViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
     queryset = TapEvent.objects.select_related("device", "student").all()
     serializer_class = TapEventSerializer
     permission_classes = [IsLecturerOrAdmin]
     pagination_class = StandardPagination
-    filterset_fields = ["device", "outcome", "session", "time_conf"]
-    search_fields = ["uid"]
-    ordering = ["-received_at"]
+    filterset_class = TapEventFilter
+    search_fields = ["uid", "student__full_name", "student__matric_no",
+                     "device__name"]
+    ordering_fields = ["tapped_at", "received_at"]
+    ordering = ["-tapped_at"]
+
+    def get_queryset(self):
+        return super().get_queryset().select_related(
+            "session", "session__course")
 
     @action(detail=False)
     def unregistered(self, request):
@@ -384,6 +649,7 @@ class AuditLogViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsOrgAdmin]
     pagination_class = StandardPagination
     filterset_fields = ["action", "actor"]
+    search_fields = ["action", "detail", "actor__username"]
     ordering = ["-created_at"]
 
 

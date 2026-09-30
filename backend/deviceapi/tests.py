@@ -22,7 +22,7 @@ class TimingTests(TestCase):
         self.course = Course.objects.create(org=self.org, code="CSC101",
                                             title="Intro")
         self.student = Student.objects.create(
-            org=self.org, matric_no="M001", first_name="Ada", last_name="Obi")
+            org=self.org, matric_no="M001", full_name="Ada Obi")
         Enrollment.objects.create(org=self.org, student=self.student,
                                   course=self.course, term=self.org.term)
         Card.objects.create(org=self.org, uid="0A3F05B2", student=self.student)

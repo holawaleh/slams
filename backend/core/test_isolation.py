@@ -26,7 +26,7 @@ def school(slug):
     course = Course.objects.create(org=org, code="CSC101", title="Intro",
                                    lecturer=owner)
     student = Student.objects.create(org=org, matric_no="M001",
-                                     first_name="S", last_name=slug.upper())
+                                     full_name=f"S {slug.upper()}")
     Enrollment.objects.create(org=org, student=student, course=course,
                               term=org.term)
     card = Card.objects.create(org=org, uid="0A0B0C0D", student=student)

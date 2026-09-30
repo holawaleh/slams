@@ -26,21 +26,21 @@ class StudentCourseApiTests(TestCase):
 
     def student(self, matric="M1"):
         return Student.objects.create(org=self.org, matric_no=matric,
-                                      first_name="A", last_name="B")
+                                      full_name="A B")
 
     def test_duplicate_matric_is_a_form_error_not_a_crash(self):
         self.student("M1")
         r = self.admin.post("/api/students/", {
-            "matric_no": " m1 ", "first_name": "C", "last_name": "D"})
+            "matric_no": " m1 ", "full_name": "C D"})
         self.assertEqual(r.status_code, 400)
         self.assertIn("matric_no", r.json())
 
     def test_same_matric_allowed_in_another_org(self):
         other = Organization.objects.create(name="Other", slug="other")
         Student.objects.create(org=other, matric_no="M1",
-                               first_name="X", last_name="Y")
+                               full_name="X Y")
         r = self.admin.post("/api/students/", {
-            "matric_no": "M1", "first_name": "C", "last_name": "D"})
+            "matric_no": "M1", "full_name": "C D"})
         self.assertEqual(r.status_code, 201, r.content)
 
     def test_duplicate_course_code_is_a_form_error(self):

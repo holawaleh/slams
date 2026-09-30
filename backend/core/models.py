@@ -5,10 +5,16 @@ from .tenancy import Organization, Membership, Invitation, TenantModel
 
 
 class Student(TenantModel):
-    matric_no  = models.CharField(max_length=32)
-    first_name = models.CharField(max_length=64)
-    last_name  = models.CharField(max_length=64)
-    short_name = models.CharField(max_length=16, blank=True)
+    # Name is stored as written. Institutions order names differently
+    # (surname first or last), so splitting it would guess wrong.
+    full_name  = models.CharField(max_length=128)
+    # Optional: freshers often have no matric number yet. Unique within
+    # the org once it is set.
+    matric_no  = models.CharField(max_length=32, blank=True)
+    phone      = models.CharField(max_length=20, blank=True)
+    email      = models.EmailField(blank=True)
+    short_name = models.CharField(max_length=16, blank=True,
+                                  help_text="Shown on the reader's display")
     department = models.CharField(max_length=64, blank=True)
     level      = models.CharField(max_length=8, blank=True)
     active     = models.BooleanField(default=True)
@@ -16,17 +22,18 @@ class Student(TenantModel):
 
     class Meta:
         constraints = [models.UniqueConstraint(
-            fields=["org", "matric_no"], name="uniq_matric_per_org")]
-        indexes = [models.Index(fields=["org", "active"])]
+            fields=["org", "matric_no"], condition=~models.Q(matric_no=""),
+            name="uniq_matric_per_org")]
+        indexes = [models.Index(fields=["org", "active"]),
+                   models.Index(fields=["org", "level"])]
 
     def save(self, *args, **kwargs):
         if not self.short_name:
-            initial = self.first_name[:1].upper()
-            self.short_name = f"{self.last_name} {initial}."[:16].upper()
+            self.short_name = " ".join(self.full_name.split())[:16].upper()
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.matric_no} {self.last_name}"
+        return self.matric_no or self.full_name
 
 
 class Card(TenantModel):
@@ -96,6 +103,12 @@ class Enrollment(TenantModel):
 
 class Device(TenantModel):
     name        = models.CharField(max_length=64)
+    # The reader's own identity: its chip's MAC address, fixed at the
+    # factory. Unique across every organisation, so one physical reader
+    # can only belong to one account at a time. Cleared when the reader
+    # is removed, which frees it to be added somewhere else.
+    hardware_id = models.CharField(max_length=17, unique=True, null=True,
+                                   blank=True)
     # Token stays globally unique - it is the lookup key for an
     # unauthenticated device, so it must resolve to exactly one org.
     token       = models.CharField(max_length=64, unique=True, blank=True)

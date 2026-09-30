@@ -33,9 +33,9 @@ class InvitationAdmin(admin.ModelAdmin):
 
 @admin.register(Student)
 class StudentAdmin(OrgScopedAdmin):
-    list_display  = ("matric_no", "last_name", "first_name", "short_name",
+    list_display  = ("full_name", "matric_no", "short_name",
                      "org", "active")
-    search_fields = ("matric_no", "last_name", "first_name")
+    search_fields = ("matric_no", "full_name", "phone", "email")
     list_filter   = ("org", "active", "department", "level")
 
 

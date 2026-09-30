@@ -68,7 +68,7 @@ export default function Overview() {
               tone={data.devices.length && !data.online ? "bad" : null} />
         <Stat label="Cards to register" value={data.unknown} to="/unknown"
               tone={data.unknown ? "warn" : null} />
-        <Stat label="Team members" value={data.org.member_count} to="/members" />
+        <Stat label="Admin s" value={data.org.member_count} to="/members" />
       </div>
 
       <div className="card">

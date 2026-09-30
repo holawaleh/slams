@@ -86,7 +86,7 @@ class Command(BaseCommand):
         students = []
         for matric, first, last in STUDENTS:
             students.append(Student.objects.create(
-                org=org, matric_no=matric, first_name=first, last_name=last,
+                org=org, matric_no=matric, full_name=f"{first} {last}",
                 department="Computer Engineering", level="400"))
 
         uids = list(UIDS)
