@@ -19,25 +19,29 @@ export default function CardCapture({ onCaptured, onCancel, studentId }) {
   const [error, setError] = useState("");
   const timer = useRef(null);
 
-  useEffect(() => {
+  // Loaded on open and again on every Start, so "offline" is current.
+  const loadReaders = () =>
     api.get("/api/devices/", { params: { active: true } })
        .then(({ data }) => {
          const list = data.results ?? data;
          setReaders(list);
-         if (list.length && !list.some((d) => String(d.id) === reader))
-           setReader(String(list[0].id));
+         setReader((cur) => (list.some((d) => String(d.id) === cur)
+           ? cur : list.length ? String(list[0].id) : ""));
        })
-       .catch(() => setReaders([]));
-    // Only on open; the chosen reader is remembered separately.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+       .catch(() => setReaders((r) => r ?? []));
+
+  useEffect(() => { loadReaders(); }, []);
 
   function start() {
     try { localStorage.setItem("captureReader", reader); } catch { /* optional */ }
     setResult(null);
     setError("");
     setLeft(WAIT_SECONDS);
-    setSince(new Date(Date.now() - 1000).toISOString());
+    loadReaders();
+    // People often tap the card first and then press Start. Count a tap
+    // from the last 20 seconds too (this also absorbs a small difference
+    // between this computer's clock and the server's).
+    setSince(new Date(Date.now() - 20000).toISOString());
   }
 
   useEffect(() => {
