@@ -8,6 +8,7 @@ import Overview from "./pages/Overview";
 import UnknownCards from "./pages/UnknownCards";
 import Students from "./pages/Students";
 import Courses, { CourseDetail } from "./pages/Courses";
+import Timetable from "./pages/Timetable";
 import "./theme.css";
 
 function Protected({ children }) {
@@ -43,7 +44,7 @@ export default function App() {
             <Route path="/unknown"    element={<UnknownCards />} />
             <Route path="/courses"    element={<Courses />} />
             <Route path="/courses/:id" element={<CourseDetail />} />
-            <Route path="/timetable"  element={<Soon title="Timetable" />} />
+            <Route path="/timetable"  element={<Timetable />} />
             <Route path="/sessions"   element={<Soon title="Lectures" />} />
             <Route path="/attendance" element={<Soon title="Attendance" />} />
             <Route path="/devices"    element={<Soon title="Devices" />} />

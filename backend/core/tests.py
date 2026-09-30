@@ -102,3 +102,63 @@ class RegisterTests(TestCase):
         c.credentials(HTTP_AUTHORIZATION="Bearer stale.expired.token")
         r = c.post("/api/auth/register/", self.BODY, format="json")
         self.assertEqual(r.status_code, 201, r.content)
+
+
+class TimetableTests(TestCase):
+    def setUp(self):
+        self.org = Organization.objects.create(name="Uni", slug="uni")
+        u = User.objects.create_user("admin", password="x")
+        Membership.objects.create(user=u, org=self.org, role=Membership.ADMIN)
+        self.api = APIClient()
+        self.api.force_authenticate(u)
+        self.venue = Venue.objects.create(org=self.org, code="LT1", name="LT1")
+        self.c1 = Course.objects.create(org=self.org, code="CSC101", title="A")
+        self.c2 = Course.objects.create(org=self.org, code="MTH101", title="B")
+
+    def slot(self, course, day=0, start="09:00", end="11:00", **kw):
+        body = {"course": course.pk, "venue": self.venue.pk, "weekday": day,
+                "start_time": start, "end_time": end, **kw}
+        return self.api.post("/api/slots/", body, format="json")
+
+    def test_slot_defaults_to_org_term(self):
+        r = self.slot(self.c1)
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["term"], self.org.term)
+
+    def test_saturday_allowed_sunday_refused(self):
+        self.assertEqual(self.slot(self.c1, day=5).status_code, 201)
+        self.assertEqual(self.slot(self.c1, day=6).status_code, 400)
+
+    def test_teaching_hours_are_7_to_18(self):
+        self.assertEqual(self.slot(self.c1, start="07:00", end="08:30").status_code, 201)
+        self.assertEqual(self.slot(self.c1, day=1, start="16:15", end="18:00").status_code, 201)
+        self.assertEqual(self.slot(self.c1, day=2, start="06:30", end="08:00").status_code, 400)
+        self.assertEqual(self.slot(self.c1, day=2, start="17:00", end="18:30").status_code, 400)
+
+    def test_room_clash_refused_touching_allowed(self):
+        self.assertEqual(self.slot(self.c1).status_code, 201)
+        r = self.slot(self.c2, start="10:00", end="12:00")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("CSC101", str(r.json()))
+        self.assertEqual(self.slot(self.c2, start="11:00", end="12:00").status_code, 201)
+
+    def test_moving_a_slot_does_not_clash_with_itself(self):
+        sid = self.slot(self.c1).json()["id"]
+        r = self.api.patch(f"/api/slots/{sid}/", {"start_time": "10:00",
+                                                  "end_time": "12:00"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+
+    def test_editing_a_slot_regenerates_its_future_session(self):
+        from .models import TimetableSlot
+        sid = self.slot(self.c1).json()["id"]
+        slot = TimetableSlot.objects.get(pk=sid)
+        now = timezone.now()
+        future = ClassSession.objects.create(
+            org=self.org, slot=slot, course=self.c1, venue=self.venue,
+            starts_at=now + timedelta(hours=2), ends_at=now + timedelta(hours=3))
+        running = ClassSession.objects.create(
+            org=self.org, slot=slot, course=self.c1, venue=self.venue,
+            starts_at=now - timedelta(minutes=5), ends_at=now + timedelta(hours=1))
+        self.api.patch(f"/api/slots/{sid}/", {"end_time": "10:30"}, format="json")
+        self.assertFalse(ClassSession.objects.filter(pk=future.pk).exists())
+        self.assertTrue(ClassSession.objects.filter(pk=running.pk).exists())

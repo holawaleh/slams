@@ -1,3 +1,5 @@
+from datetime import time
+
 from rest_framework import serializers
 from .base_serializers import TenantSerializer
 from django.contrib.auth.models import User
@@ -75,6 +77,12 @@ class VenueSerializer(TenantSerializer):
         model = Venue
         fields = ("id", "code", "name", "capacity")
 
+    def validate_code(self, value):
+        value = value.strip().upper()
+        unique_in_org(self, Venue, "code", value,
+                      "A venue with this code already exists.")
+        return value
+
 
 class CourseSerializer(TenantSerializer):
     lecturer_name    = serializers.CharField(source="lecturer.get_full_name",
@@ -131,23 +139,71 @@ class DeviceSerializer(TenantSerializer):
 
 
 class TimetableSlotSerializer(TenantSerializer):
-    course_code = serializers.CharField(source="course.code", read_only=True)
-    venue_code  = serializers.CharField(source="venue.code", read_only=True)
+    # The teaching week. Lectures run Monday to Saturday, 07:00 to 18:00.
+    FIRST_DAY, LAST_DAY = 0, 5
+    DAY_START, DAY_END = time(7, 0), time(18, 0)
+
+    course_code  = serializers.CharField(source="course.code", read_only=True)
+    course_title = serializers.CharField(source="course.title", read_only=True)
+    lecturer_name = serializers.CharField(
+        source="course.lecturer.get_full_name", read_only=True, default="")
+    venue_code   = serializers.CharField(source="venue.code", read_only=True)
     weekday_name = serializers.CharField(source="get_weekday_display",
                                          read_only=True)
 
     class Meta:
         model = TimetableSlot
-        fields = ("id", "course", "course_code", "venue", "venue_code",
+        fields = ("id", "course", "course_code", "course_title",
+                  "lecturer_name", "venue", "venue_code",
                   "weekday", "weekday_name", "start_time", "end_time",
                   "grace_minutes", "term", "active")
+        extra_kwargs = {"term": {"required": False}}
+
+    def validate_weekday(self, value):
+        if not self.FIRST_DAY <= value <= self.LAST_DAY:
+            raise serializers.ValidationError(
+                "Lectures run Monday to Saturday.")
+        return value
+
+    def validate_grace_minutes(self, value):
+        if value > 120:
+            raise serializers.ValidationError("At most 120 minutes.")
+        return value
 
     def validate(self, data):
-        start = data.get("start_time")
-        end   = data.get("end_time")
-        if start and end and end <= start:
-            raise serializers.ValidationError(
-                {"end_time": "End time must be after the start time."})
+        # super() carries the cross-organisation check. Skipping it here
+        # once let a slot be attached to another school's venue.
+        data = super().validate(data)
+
+        # A PATCH may send one field; judge the slot as it will end up.
+        cur = lambda k: data.get(k, getattr(self.instance, k, None))
+        start, end = cur("start_time"), cur("end_time")
+        if start and end:
+            if end <= start:
+                raise serializers.ValidationError(
+                    {"end_time": "End time must be after the start time."})
+            if start < self.DAY_START or end > self.DAY_END:
+                raise serializers.ValidationError(
+                    {"start_time": "Lectures must fall between 07:00 and 18:00."})
+
+        if not cur("term"):
+            data["term"] = self._org().term
+
+        # Two lectures cannot share a room at the same time. Touching
+        # (one ends 10:00, the next starts 10:00) is fine.
+        venue, day = cur("venue"), cur("weekday")
+        if venue and day is not None and start and end and cur("active") is not False:
+            clash = TimetableSlot.objects.filter(
+                org=self._org(), venue=venue, weekday=day, active=True,
+                term=data.get("term") or cur("term"),
+                start_time__lt=end, end_time__gt=start)
+            if self.instance is not None:
+                clash = clash.exclude(pk=self.instance.pk)
+            other = clash.select_related("course").first()
+            if other:
+                raise serializers.ValidationError({"venue": (
+                    f"{venue.code} is already booked for {other.course.code} "
+                    f"{other.start_time:%H:%M}-{other.end_time:%H:%M}.")})
         return data
 
 

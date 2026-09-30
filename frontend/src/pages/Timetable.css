@@ -1,0 +1,79 @@
+.tt-card{padding:0;overflow-x:auto}
+
+/* One time axis plus six day columns. Rows are drawn as a background
+   so lectures can start at any quarter hour, not only on the hour. */
+.tt{
+  display:grid;
+  grid-template-columns:56px repeat(6,minmax(110px,1fr));
+  grid-template-rows:auto calc(var(--hour) * var(--hours));
+  min-width:720px;
+}
+
+.tt-corner,.tt-dayhead{
+  position:sticky;top:0;
+  background:var(--card);
+  border-bottom:1px solid var(--line);
+  z-index:2;
+}
+.tt-dayhead{
+  padding:10px 8px;
+  font-size:12px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.05em;
+  color:var(--ink-faint);
+  text-align:center;
+  border-left:1px solid var(--line-soft);
+}
+.tt-short{display:none}
+@media (max-width:900px){.tt-long{display:none}.tt-short{display:inline}}
+
+.tt-axis{position:relative}
+.tt-hour{
+  height:var(--hour);
+  font-size:11px;color:var(--ink-faint);
+  text-align:right;padding-right:8px;
+  transform:translateY(-7px);
+}
+.tt-hour:first-child{transform:none}
+.tt-last{position:absolute;bottom:-7px;right:0;height:auto}
+
+.tt-day{
+  position:relative;
+  border-left:1px solid var(--line-soft);
+  background-image:
+    linear-gradient(to bottom,var(--line-soft) 1px,transparent 1px),
+    linear-gradient(to bottom,transparent calc(var(--hour) / 2),
+                    color-mix(in srgb,var(--line-soft) 45%,transparent) calc(var(--hour) / 2),
+                    color-mix(in srgb,var(--line-soft) 45%,transparent) calc(var(--hour) / 2 + 1px),
+                    transparent calc(var(--hour) / 2 + 1px));
+  background-size:100% var(--hour);
+}
+.tt-day.editable{cursor:copy}
+.tt-day.editable:hover{background-color:color-mix(in srgb,var(--accent) 4%,transparent)}
+
+.tt-slot{
+  position:absolute;
+  display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;
+  gap:1px;
+  padding:5px 7px;
+  overflow:hidden;
+  text-align:left;
+  font-size:12px;font-weight:400;line-height:1.3;
+  color:var(--ink);
+  background:hsl(var(--h) 65% 50% / .16);
+  border:0;
+  border-left:3px solid hsl(var(--h) 60% 45%);
+  border-radius:6px;
+  cursor:pointer;
+}
+.tt-slot:hover:not(:disabled){background:hsl(var(--h) 65% 50% / .28);color:var(--ink)}
+.tt-slot:disabled{opacity:1;cursor:default}
+.tt-slot strong{font-size:13px}
+.tt-slot span{color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.tt-who{font-style:italic}
+
+.venue-add{
+  display:grid;
+  grid-template-columns:1fr 1.4fr 90px auto;
+  gap:8px;margin-bottom:16px;
+}
+@media (max-width:560px){.venue-add{grid-template-columns:1fr 1fr}}

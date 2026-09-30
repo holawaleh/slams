@@ -30,8 +30,8 @@ def destroy_or_conflict(view, request, what):
         return viewsets.ModelViewSet.destroy(view, request)
     except ProtectedError:
         return Response(
-            {"detail": f"This {what} has attendance history and cannot be "
-                       f"deleted."},
+            {"detail": f"This {what} has lecture or attendance history and "
+                       f"cannot be deleted."},
             status=status.HTTP_409_CONFLICT)
 
 
@@ -160,7 +160,12 @@ class VenueViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     queryset = Venue.objects.all()
     serializer_class = VenueSerializer
     permission_classes = [IsOrgAdminOrReadOnly]
+    pagination_class = LargePagination
     search_fields = ["code", "name"]
+    ordering = ["code"]
+
+    def destroy(self, request, *args, **kwargs):
+        return destroy_or_conflict(self, request, "venue")
 
 
 class CourseViewSet(TenantScopedMixin, viewsets.ModelViewSet):
@@ -252,6 +257,37 @@ class TimetableSlotViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     filterset_fields = ["course", "venue", "weekday", "term", "active"]
     ordering = ["weekday", "start_time"]
 
+    def _drop_future_sessions(self, slot):
+        """Sessions are generated from a slot the first time a reader
+        checks in that day. After an edit, a session already generated
+        for later today would keep the old time, and the reader would
+        also get a second one at the new time. Removing sessions that
+        have not started lets them be generated again from the new slot.
+        One that has started, or has attendance, is left alone."""
+        ClassSession.objects.filter(
+            org=self.org, slot=slot, status="scheduled",
+            starts_at__gt=timezone.now(), records__isnull=True).delete()
+
+    def perform_create(self, serializer):
+        slot = serializer.save()
+        audit(self.request, "slot_create", self._describe(slot))
+
+    def perform_update(self, serializer):
+        slot = serializer.save()
+        self._drop_future_sessions(slot)
+        audit(self.request, "slot_update", self._describe(slot))
+
+    def perform_destroy(self, instance):
+        self._drop_future_sessions(instance)
+        audit(self.request, "slot_delete", self._describe(instance))
+        instance.delete()
+
+    @staticmethod
+    def _describe(slot):
+        return (f"{slot.course.code} {slot.get_weekday_display()} "
+                f"{slot.start_time:%H:%M}-{slot.end_time:%H:%M} "
+                f"{slot.venue.code}")
+
 
 class ClassSessionViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     queryset = ClassSession.objects.select_related("course", "venue").annotate(
@@ -321,7 +357,7 @@ class TapEventViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
         """Cards seen by a device but not in the Card table. This is the
         registrar's worklist for binding new cards."""
         known = Card.objects.filter(org=self.org).values_list("uid", flat=True)
-        rows = (TapEvent.objects.filter(outcome="unknown")
+        rows = (TapEvent.objects.filter(org=self.org, outcome="unknown")
                 .exclude(uid__in=known)
                 .values("uid")
                 .annotate(times_seen=Count("id"),

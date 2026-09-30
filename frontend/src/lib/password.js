@@ -10,3 +10,7 @@ export const PASSWORD_RULES = [
 ];
 
 export const passwordOk = (p) => PASSWORD_RULES.every((r) => r.test(p));
+
+// The rules a password still fails, named so the message can say which.
+export const missingRules = (p) =>
+  PASSWORD_RULES.filter((r) => !r.test(p)).map((r) => r.label.toLowerCase());

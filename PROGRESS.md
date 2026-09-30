@@ -67,6 +67,10 @@ Live: `https://slams-bez9.onrender.com` and `https://slams-chi.vercel.app`
 - [x] Multi-tenant models with per-org unique constraints
 - [x] Registration, JWT login, roles (owner / admin / lecturer / viewer)
 - [x] Tenant isolation verified — 8 Postman tests passing
+- [x] Isolation suite in `core/test_isolation.py` (14 tests, two schools)
+- [x] Relation fields only resolve rows in the caller's org; foreign ids
+      look identical to missing ids
+- [x] Timetable rules: Mon-Sat, 07:00-18:00, no double-booked room
 - [x] Device API: token auth, 5 endpoints, binary directory packing
 - [x] Idempotent uploads via client id + unique constraint
 - [x] Audit log on every card binding
@@ -79,6 +83,7 @@ Live: `https://slams-bez9.onrender.com` and `https://slams-chi.vercel.app`
 - [x] New cards worklist — bind a seen UID to a student
 - [x] Students: search, add, edit, deactivate, per-course attendance
 - [x] Courses: add, edit, lecturer, roster, bulk enrolment
+- [x] Timetable: Mon-Sat 07:00-18:00 week grid, click to add/edit, venues
 
 ### Timing (server-authoritative)
 - [x] Device clock synced from the backend in ms, half the round trip allowed for
@@ -162,7 +167,6 @@ Not the upload bug — the **offline lecture test**. It exercises the queue, the
 
 ### Frontend
 - [ ] Cards
-- [ ] Timetable and venues
 - [ ] Device management, token reveal
 - [ ] Live lecture view (polls with a `since` cursor)
 - [ ] Attendance reports

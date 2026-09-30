@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { PASSWORD_RULES, passwordOk } from "../lib/password";
+import { PASSWORD_RULES, passwordOk, missingRules } from "../lib/password";
 import PasswordInput from "../components/PasswordInput";
 import ThemeToggle from "../components/ThemeToggle";
 import "./Login.css";
 
 const TEXT_FIELDS = [
   { name: "org_name",   label: "School",           autoComplete: "organization",
-    placeholder: "e.g. University of Lagos" },
+    placeholder: "e.g. Computer Science" },
   { name: "first_name", label: "First name",       autoComplete: "given-name" },
   { name: "last_name",  label: "Last name",        autoComplete: "family-name" },
   { name: "username",   label: "Username",         autoComplete: "username",
@@ -39,7 +39,7 @@ export default function Register() {
       if (!f.optional && !form[f.name].trim()) local[f.name] = "Required.";
     }
     if (!passwordOk(form.password))
-      local.password = "Password does not meet every rule below.";
+      local.password = `Still needed: ${missingRules(form.password).join(", ")}.`;
     if (form.confirm !== form.password)
       local.confirm = "Passwords do not match.";
     setErrors(local);
@@ -79,7 +79,7 @@ export default function Register() {
       <div className="auth-card card">
         <h2 className="center">Create an account</h2>
         <p className="muted center auth-sub">
-          Register your school. You will be its owner.
+          Register your Department
         </p>
 
         {error && <div className="alert alert-bad">{error}</div>}
@@ -105,12 +105,19 @@ export default function Register() {
                            invalid={!!errors.password}
                            onChange={set("password")} />
             <ul className="pw-rules" aria-live="polite">
-              {PASSWORD_RULES.map((r) => {
+              {PASSWORD_RULES.map((r, i) => {
                 const met = r.test(form.password);
+                // Once typing has started, an unmet rule is a failure, not
+                // a neutral bullet - otherwise it is easy to miss the one
+                // rule that is holding the form up.
+                const failed = !met && form.password.length > 0;
                 return (
-                  <li key={r.label} className={met ? "met" : ""}>
-                    <span aria-hidden="true">{met ? "✓" : "•"}</span>
+                  <li key={r.label} className={met ? "met" : failed ? "unmet" : ""}>
+                    <span aria-hidden="true">{met ? "✓" : failed ? "✗" : "•"}</span>
                     {r.label}
+                    {i === 0 && form.password.length > 0 && (
+                      <span className="pw-count">({form.password.length}/10)</span>
+                    )}
                   </li>
                 );
               })}
