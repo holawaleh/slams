@@ -440,14 +440,36 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     search_fields = ["name", "hardware_id"]
     ordering = ["name"]
 
-    def perform_create(self, serializer):
+    def check_plan_limit(self):
         active = Device.objects.filter(org=self.org, active=True).count()
         if active >= self.org.max_devices:
             raise ValidationError({"detail":
                 f"Your plan allows {self.org.max_devices} readers. "
                 f"Remove one first."})
+
+    def perform_create(self, serializer):
+        self.check_plan_limit()
         device = serializer.save()
         audit(self.request, "device_add", f"{device.name} {device.hardware_id}")
+
+    @action(detail=False)
+    def discover(self, request):
+        """Readers on this network that are not registered anywhere."""
+        from deviceapi.pairing import discover
+        return Response(discover(request, self.org))
+
+    @action(detail=False, methods=["post"])
+    def claim(self, request):
+        """Add a discovered reader, proven by the code on its screen. The
+        reader picks up its token by itself; nothing to copy."""
+        from deviceapi.pairing import claim
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.check_plan_limit()
+        device = claim(request, self.org, serializer)
+        audit(request, "device_add", f"{device.name} {device.hardware_id} (paired)")
+        return Response(self.get_serializer(device).data,
+                        status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
         device = serializer.save()

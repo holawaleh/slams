@@ -12,6 +12,12 @@ export function maskMac(value) {
   return hex.match(/.{1,2}/g)?.join(":") ?? "";
 }
 
+// Pairing codes are six digits, shown on the reader as "482 913".
+function maskCode(value) {
+  const d = value.replace(/\D/g, "").slice(0, 6);
+  return d.length > 3 ? `${d.slice(0, 3)} ${d.slice(3)}` : d;
+}
+
 function useVenues() {
   const [venues, setVenues] = useState([]);
   useEffect(() => {
@@ -21,36 +27,217 @@ function useVenues() {
   return venues;
 }
 
-function DeviceForm({ device, onClose, onSaved }) {
-  const editing = !!device;
+function fieldErr(error, k) {
+  const v = error?.response?.data?.[k];
+  return v ? <small className="field-error">{Array.isArray(v) ? v.join(" ") : v}</small> : null;
+}
+
+function secondsAgo(iso) {
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
+  return s < 5 ? "just now" : `${s}s ago`;
+}
+
+// Step 1: look for readers announcing themselves on this network.
+// Step 2: name the chosen one and type the code from its screen.
+// Step 3: wait for the reader to collect its token and check in.
+function AddReader({ onClose, onAdded }) {
   const venues = useVenues();
-  const [form, setForm] = useState({
-    name: device?.name ?? "", hardware_id: device?.hardware_id ?? "",
-    venue: device?.venue ?? "",
-  });
+  const [step, setStep] = useState("search");       // search | pair | done
+  const [found, setFound] = useState(null);
+  const [manual, setManual] = useState(false);
+  const [picked, setPicked] = useState(null);       // hardware id
+  const [form, setForm] = useState({ name: "", venue: "", code: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const fieldErr = (k) => {
-    const v = error?.response?.data?.[k];
-    return v ? <small className="field-error">{Array.isArray(v) ? v.join(" ") : v}</small> : null;
-  };
-  const fieldKeys = ["name", "hardware_id", "venue"];
-  const general = error && !fieldKeys.some((k) => error.response?.data?.[k]);
+  const [device, setDevice] = useState(null);
+
+  // Searching: ask every 3 seconds while the list is on screen.
+  useEffect(() => {
+    if (step !== "search") return undefined;
+    let stop = false;
+    let timer;
+    const look = () => api.get("/api/devices/discover/")
+      .then(({ data }) => { if (!stop) setFound(data); })
+      .catch(() => {})
+      .finally(() => { if (!stop) timer = setTimeout(look, 3000); });
+    look();
+    return () => { stop = true; clearTimeout(timer); };
+  }, [step]);
+
+  // Added: watch for the reader's first check-in with its new token.
+  useEffect(() => {
+    if (step !== "done" || !device || device.last_seen) return undefined;
+    const timer = setInterval(() => {
+      api.get(`/api/devices/${device.id}/`).then(({ data }) => {
+        if (data.last_seen) setDevice(data);
+      }).catch(() => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [step, device]);
+
+  function choose(hw) {
+    setPicked(hw);
+    setForm({ name: "", venue: venues[0]?.id ?? "", code: "" });
+    setError(null);
+    setStep("pair");
+  }
+
+  async function pair(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const { data } = await api.post("/api/devices/claim/", {
+        hardware_id: picked, code: form.code.replace(/\s/g, ""),
+        name: form.name.trim(), venue: form.venue || null,
+      });
+      setDevice(data);
+      setStep("done");
+      onAdded();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (step === "done") {
+    const connected = !!device?.last_seen;
+    return (
+      <Modal title="Reader added" onClose={onClose}>
+        <p style={{ marginTop: 0 }}>
+          <strong>{device.name}</strong> ({device.hardware_id}) now belongs to your account
+          and cannot be added to any other until you remove it.
+        </p>
+        <p className={connected ? "" : "muted"} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {connected ? <span className="pill pill-ok">connected</span>
+                     : <span className="pulse" aria-hidden="true" />}
+          {connected ? "The reader has checked in and is ready."
+                     : "Waiting for the reader to pick up its settings. This takes a few seconds; its screen will say “Reader added”."}
+        </p>
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn-solid" onClick={onClose}>Done</button>
+        </div>
+      </Modal>
+    );
+  }
+
+  if (step === "pair") {
+    const general = error && !["code", "hardware_id", "name", "venue"].some((k) => error.response?.data?.[k]);
+    return (
+      <Modal title="Add this reader" onClose={onClose}>
+        <form onSubmit={pair} noValidate>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Reader <code className="mono">{picked}</code>
+          </p>
+          {general && <div className="alert alert-bad">{errorText(error)}</div>}
+          {fieldErr(error, "hardware_id")}
+          <div className="field">
+            <label htmlFor="pcode">Pairing code</label>
+            <input id="pcode" className="input mono code-input" autoFocus inputMode="numeric"
+                   autoComplete="one-time-code" placeholder="000 000"
+                   value={form.code} onChange={(e) => setForm({ ...form, code: maskCode(e.target.value) })} />
+            {fieldErr(error, "code") || (
+              <small className="faint" style={{ display: "block", marginTop: 6 }}>
+                The 6 digits on the reader's screen, under &ldquo;Pair code&rdquo;.
+              </small>
+            )}
+          </div>
+          <div className="form-2">
+            <div className="field">
+              <label htmlFor="pname">Name</label>
+              <input id="pname" className="input" maxLength={64} placeholder="LT1 front door"
+                     value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              {fieldErr(error, "name")}
+            </div>
+            <div className="field">
+              <label htmlFor="pvenue">Venue</label>
+              <select id="pvenue" className="input" value={form.venue ?? ""}
+                      onChange={(e) => setForm({ ...form, venue: e.target.value })}>
+                <option value="">Not placed yet</option>
+                {venues.map((v) => <option key={v.id} value={v.id}>{v.code}</option>)}
+              </select>
+              {fieldErr(error, "venue")}
+            </div>
+          </div>
+          <div className="spread">
+            <button type="button" className="btn-ghost" onClick={() => { setStep("search"); setError(null); }}>
+              Back
+            </button>
+            <button className="btn-solid"
+                    disabled={busy || form.code.replace(/\s/g, "").length !== 6 || !form.name.trim()}>
+              {busy ? "Adding..." : "Add reader"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title="Search for readers" onClose={onClose} width={560}>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Power the reader on and connect it to WiFi. Readers that are not yet in
+        any account and are on the same network as this computer appear here.
+      </p>
+      <div className="pick-list">
+        {found === null ? <Loading what="readers" /> : found.length === 0 ? (
+          <p className="capture-wait" style={{ padding: 14, margin: 0 }}>
+            <span className="pulse" aria-hidden="true" /> Searching…
+          </p>
+        ) : found.map((r) => (
+          <button key={r.hardware_id} type="button" className="pick-row reader-row"
+                  onClick={() => choose(r.hardware_id)}>
+            <span className="grow">
+              <code className="mono">{r.hardware_id}</code>
+              <small className="faint" style={{ display: "block" }}>
+                {r.local_ip && `IP ${r.local_ip} · `}firmware {r.firmware || "?"} · seen {secondsAgo(r.last_seen)}
+              </small>
+            </span>
+            <span className="btn-solid btn-sm" aria-hidden="true">Select</span>
+          </button>
+        ))}
+      </div>
+
+      {manual ? (
+        <form className="row" style={{ marginTop: 14 }}
+              onSubmit={(e) => { e.preventDefault(); if (picked?.length === 17) choose(picked); }}>
+          <input className="input mono" autoFocus placeholder="__:__:__:__:__:__"
+                 value={picked ?? ""} onChange={(e) => setPicked(maskMac(e.target.value))} />
+          <button className="btn-solid" style={{ flex: "0 0 auto" }}
+                  disabled={picked?.length !== 17}>Next</button>
+        </form>
+      ) : (
+        <p className="faint" style={{ fontSize: 13, marginBottom: 0 }}>
+          Not listed? A reader on a different network (for example if this computer is
+          on mobile data) will not show up.{" "}
+          <button type="button" className="linkish" onClick={() => { setManual(true); setPicked(""); }}>
+            Enter its reader ID instead
+          </button>
+        </p>
+      )}
+
+      <div className="row" style={{ justifyContent: "flex-end", marginTop: 16 }}>
+        <button className="btn-ghost" onClick={onClose}>Close</button>
+      </div>
+    </Modal>
+  );
+}
+
+function EditReader({ device, onClose, onSaved }) {
+  const venues = useVenues();
+  const [form, setForm] = useState({ name: device.name, venue: device.venue ?? "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
 
   async function save(e) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const body = { ...form, venue: form.venue || null };
-    // A reader registered before readers had IDs may have none yet; it
-    // gets one the first time it checks in.
-    if (editing && !body.hardware_id) delete body.hardware_id;
     try {
-      const { data } = editing
-        ? await api.patch(`/api/devices/${device.id}/`, body)
-        : await api.post("/api/devices/", body);
-      onSaved(data, editing);
+      const { data } = await api.patch(`/api/devices/${device.id}/`,
+                                       { name: form.name, venue: form.venue || null });
+      onSaved(data);
     } catch (err) {
       setError(err);
       setBusy(false);
@@ -58,40 +245,26 @@ function DeviceForm({ device, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={editing ? `Edit ${device.name}` : "Add reader"} onClose={onClose}>
+    <Modal title={`Edit ${device.name}`} onClose={onClose}>
       <form onSubmit={save} noValidate>
-        {general && <div className="alert alert-bad">{errorText(error)}</div>}
-        <div className="field">
-          <label htmlFor="hw">Reader ID</label>
-          <input id="hw" className="input mono" autoFocus={!editing} required
-                 placeholder="__:__:__:__:__:__" autoComplete="off" spellCheck={false}
-                 inputMode="text" maxLength={17} autoCapitalize="characters"
-                 value={form.hardware_id}
-                 onChange={(e) => setForm({ ...form, hardware_id: maskMac(e.target.value) })} />
-          <small className="faint" style={{ display: "block", marginTop: 6 }}>
-            {form.hardware_id.replace(/:/g, "").length}/12 characters
-          </small>
-          {fieldErr("hardware_id")}
-          <small className="faint" style={{ display: "block", marginTop: 6 }}>
-            Shown on the reader's screen for a few seconds when it powers on,
-            and on its setup page. A reader can belong to only one account.
-          </small>
-        </div>
+        {error && !error.response?.data?.name && <div className="alert alert-bad">{errorText(error)}</div>}
+        <p className="muted" style={{ marginTop: 0 }}>
+          Reader <code className="mono">{device.hardware_id || "ID set on first check-in"}</code>
+        </p>
         <div className="form-2">
           <div className="field">
             <label htmlFor="dname">Name</label>
-            <input id="dname" className="input" required maxLength={64}
-                   placeholder="LT1 front door" value={form.name} onChange={set("name")} />
-            {fieldErr("name")}
+            <input id="dname" className="input" maxLength={64} value={form.name}
+                   onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            {fieldErr(error, "name")}
           </div>
           <div className="field">
             <label htmlFor="dvenue">Venue</label>
             <select id="dvenue" className="input" value={form.venue ?? ""}
-                    onChange={set("venue")}>
+                    onChange={(e) => setForm({ ...form, venue: e.target.value })}>
               <option value="">Not placed yet</option>
               {venues.map((v) => <option key={v.id} value={v.id}>{v.code}</option>)}
             </select>
-            {fieldErr("venue")}
           </div>
         </div>
         <p className="faint" style={{ fontSize: 13, marginTop: -4 }}>
@@ -99,10 +272,8 @@ function DeviceForm({ device, onClose, onSaved }) {
         </p>
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-solid"
-                  disabled={busy || !form.name.trim() ||
-                            (!editing && form.hardware_id.length !== 17)}>
-            {busy ? "Saving..." : editing ? "Save" : "Add reader"}
+          <button className="btn-solid" disabled={busy || !form.name.trim()}>
+            {busy ? "Saving..." : "Save"}
           </button>
         </div>
       </form>
@@ -110,51 +281,10 @@ function DeviceForm({ device, onClose, onSaved }) {
   );
 }
 
-function TokenDialog({ device, onClose }) {
-  const [token, setToken] = useState(null);
-  const [error, setError] = useState(null);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    api.post(`/api/devices/${device.id}/reveal_token/`)
-       .then(({ data }) => setToken(data.token)).catch(setError);
-  }, [device.id]);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(token);
-      setCopied(true);
-    } catch { /* select and copy by hand */ }
-  }
-
-  return (
-    <Modal title={`Token for ${device.name}`} onClose={onClose}>
-      <ErrorBox error={error} />
-      <p className="muted" style={{ marginTop: 0 }}>
-        On the reader's setup page, paste this into <strong>Device token</strong> and
-        set the backend address to <code>{api.defaults.baseURL}</code>.
-        The token only works on this reader. Viewing it is recorded in the audit log.
-      </p>
-      {token ? (
-        <div className="row">
-          <input className="input mono" readOnly value={token}
-                 onFocus={(e) => e.target.select()} />
-          <button className="btn-solid" style={{ flex: "0 0 auto" }} onClick={copy}>
-            {copied ? "Copied" : "Copy"}
-          </button>
-        </div>
-      ) : !error && <Loading what="token" />}
-      <div className="row" style={{ justifyContent: "flex-end", marginTop: 16 }}>
-        <button className="btn-ghost" onClick={onClose}>Done</button>
-      </div>
-    </Modal>
-  );
-}
-
 export default function Devices({ embedded = false }) {
   const { rows, loading, error, reload } = useList("/api/devices/", { active: true });
-  const [editing, setEditing] = useState(null);     // "new" | device
-  const [showToken, setShowToken] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [flash, setFlash] = useState("");
   const [actionError, setActionError] = useState(null);
 
@@ -165,8 +295,8 @@ export default function Devices({ embedded = false }) {
 
   async function remove(d) {
     if (!window.confirm(
-      `Remove ${d.name}? It stops working straight away and can then be added ` +
-      `to another account. Its attendance history is kept.`)) return;
+      `Remove ${d.name}? It stops working straight away, shows a new pairing code, ` +
+      `and can then be added to another account. Its attendance history is kept.`)) return;
     setActionError(null);
     try {
       await api.delete(`/api/devices/${d.id}/`);
@@ -177,17 +307,19 @@ export default function Devices({ embedded = false }) {
     }
   }
 
+  const addButton = (
+    <button className="btn-solid" onClick={() => setAdding(true)}>Search for readers</button>
+  );
+
   return (
     <>
       {embedded ? (
         <div className="spread filters">
           <p className="muted" style={{ margin: 0 }}>Card readers in your lecture halls.</p>
-          <button className="btn-solid" onClick={() => setEditing("new")}>Add reader</button>
+          {addButton}
         </div>
       ) : (
-        <PageHead title="Devices" subtitle="Card readers in your lecture halls">
-          <button className="btn-solid" onClick={() => setEditing("new")}>Add reader</button>
-        </PageHead>
+        <PageHead title="Devices" subtitle="Card readers in your lecture halls">{addButton}</PageHead>
       )}
 
       {flash && <div className="alert alert-ok">{flash}</div>}
@@ -196,7 +328,7 @@ export default function Devices({ embedded = false }) {
       <div className="card" style={{ padding: 0 }}>
         {loading ? <Loading what="readers" /> : rows.length === 0 ? (
           <Empty message="No readers yet."
-                 hint="Power a reader on, note the Reader ID it shows, and add it here." />
+                 hint="Power a reader on, connect it to WiFi, then press Search for readers." />
         ) : (
           <div className="table-wrap">
             <table>
@@ -219,7 +351,6 @@ export default function Devices({ embedded = false }) {
                     <td className="muted">{d.last_seen ? ago(d.last_seen) : "never"}</td>
                     <td className="muted">{d.queue_depth} tap{d.queue_depth === 1 ? "" : "s"}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                      <button className="btn-ghost btn-sm" onClick={() => setShowToken(d)}>Token</button>{" "}
                       <button className="btn-ghost btn-sm" onClick={() => setEditing(d)}>Edit</button>{" "}
                       <button className="btn-ghost btn-sm" onClick={() => remove(d)}>Remove</button>
                     </td>
@@ -231,17 +362,11 @@ export default function Devices({ embedded = false }) {
         )}
       </div>
 
+      {adding && <AddReader onClose={() => { setAdding(false); reload(); }} onAdded={reload} />}
       {editing && (
-        <DeviceForm device={editing === "new" ? null : editing}
-                    onClose={() => setEditing(null)}
-                    onSaved={(d, wasEdit) => {
-                      setEditing(null);
-                      reload();
-                      if (wasEdit) note(`${d.name} updated.`);
-                      else setShowToken(d);
-                    }} />
+        <EditReader device={editing} onClose={() => setEditing(null)}
+                    onSaved={(d) => { setEditing(null); reload(); note(`${d.name} updated.`); }} />
       )}
-      {showToken && <TokenDialog device={showToken} onClose={() => setShowToken(null)} />}
     </>
   );
 }
