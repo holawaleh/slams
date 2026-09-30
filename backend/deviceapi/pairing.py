@@ -112,7 +112,11 @@ class AnnounceView(APIView):
                              "device": mine.device.name,
                              "server_utc_ms": int(now.timestamp() * 1000)})
 
-        if Device.objects.filter(hardware_id=hw).exists():
+        # A registered reader is only offered a code if its own account has
+        # asked to re-pair it (it lost its token: storage wiped, board
+        # replaced). Otherwise it stays unclaimable.
+        device = Device.objects.filter(hardware_id=hw).first()
+        if device and not (device.repair_until and device.repair_until > now):
             return Response({"status": "registered"})
 
         if mine is None:
@@ -151,12 +155,11 @@ class ClaimSerializer(serializers.Serializer):
         "invalid": "Enter the 6-digit code shown on the reader."})
 
 
-def claim(request, org, device_serializer):
-    """Check the pairing code, then create the device. device_serializer
-    is already validated (name, venue, hardware id not registered)."""
-    s = ClaimSerializer(data=request.data)
+def check_code(hw, raw_code):
+    """The announcement from this reader whose code the admin typed, or a
+    validation error. Wrong guesses count, and rotate the code."""
+    s = ClaimSerializer(data={"hardware_id": hw, "code": raw_code})
     s.is_valid(raise_exception=True)
-    hw = device_serializer.validated_data["hardware_id"]
     code = s.validated_data["code"].replace(" ", "").strip()
 
     candidates = DiscoveredReader.objects.filter(
@@ -164,8 +167,8 @@ def claim(request, org, device_serializer):
         last_seen__gte=timezone.now() - FORGET_AFTER)
     if not candidates.exists():
         raise serializers.ValidationError({"hardware_id":
-            "That reader is not announcing itself. Check it is powered on and "
-            "online, then search again."})
+            "That reader is not showing a pairing code. Check it is powered on "
+            "and online, then try again."})
 
     match = candidates.filter(code=code).first()
     if match is None:
@@ -177,10 +180,49 @@ def claim(request, org, device_serializer):
         raise serializers.ValidationError({"code":
             "That is not the code on the reader's screen. After 5 wrong tries "
             "the reader shows a new code."})
+    return match, candidates
 
+
+def hand_over(match, candidates, device):
+    """Hold the device's token for the reader to collect."""
+    match.device, match.token = device, device.token
+    match.save(update_fields=["device", "token"])
+    candidates.exclude(pk=match.pk).delete()
+
+
+def claim(request, org, device_serializer):
+    """Check the pairing code, then create the device. device_serializer
+    is already validated (name, venue, hardware id not registered)."""
+    hw = device_serializer.validated_data["hardware_id"]
+    match, candidates = check_code(hw, request.data.get("code", ""))
     with transaction.atomic():
         device = device_serializer.save()
-        match.device, match.token = device, device.token
-        match.save(update_fields=["device", "token"])
-        candidates.exclude(pk=match.pk).delete()
+        hand_over(match, candidates, device)
+    return device
+
+
+REPAIR_WINDOW = timedelta(minutes=15)
+
+
+def open_repair(device):
+    """Let this account's own reader show a pairing code again, for when it
+    has lost its token. Nobody else can use the window: confirming needs
+    the code from the reader's screen and happens on this device entry."""
+    device.repair_until = timezone.now() + REPAIR_WINDOW
+    device.save(update_fields=["repair_until"])
+
+
+def confirm_repair(request, device):
+    """Reconnect the same device entry: name, venue and history are kept.
+    The old token is replaced, so a copy of it elsewhere stops working."""
+    import secrets
+    if not (device.repair_until and device.repair_until > timezone.now()):
+        raise serializers.ValidationError({"detail":
+            "Re-pairing has expired. Start it again."})
+    match, candidates = check_code(device.hardware_id, request.data.get("code", ""))
+    with transaction.atomic():
+        device.token = secrets.token_urlsafe(32)
+        device.repair_until = None
+        device.save(update_fields=["token", "repair_until"])
+        hand_over(match, candidates, device)
     return device

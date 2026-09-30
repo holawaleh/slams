@@ -224,6 +224,76 @@ function AddReader({ onClose, onAdded }) {
   );
 }
 
+// For a reader already in this account that lost its token: it goes
+// back to showing a pairing code, and the code reconnects this same entry.
+function RepairReader({ device, onClose, onDone }) {
+  const [phase, setPhase] = useState("opening");      // opening | code | done
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [minutes, setMinutes] = useState(15);
+
+  useEffect(() => {
+    api.post(`/api/devices/${device.id}/repair/`)
+       .then(({ data }) => { setMinutes(data.minutes); setPhase("code"); })
+       .catch((err) => { setError(err); setPhase("code"); });
+  }, [device.id]);
+
+  async function confirm(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post(`/api/devices/${device.id}/repair_confirm/`,
+                     { code: code.replace(/\s/g, "") });
+      setPhase("done");
+      onDone();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`Re-pair ${device.name}`} onClose={onClose}>
+      {phase === "done" ? (
+        <>
+          <p style={{ marginTop: 0 }}>
+            Reconnected. The reader picks up its new settings within a few seconds
+            and its screen says &ldquo;Reader added&rdquo;. Its name, venue and history are unchanged.
+          </p>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button className="btn-solid" onClick={onClose}>Done</button>
+          </div>
+        </>
+      ) : phase === "opening" ? <Loading what="re-pairing" /> : (
+        <form onSubmit={confirm} noValidate>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Use this when the reader has lost its settings and shows
+            &ldquo;Re-pair in app&rdquo; or a pairing code. Within a few seconds it shows a
+            6-digit code; type it below. This stays open for {minutes} minutes.
+          </p>
+          {error && !error.response?.data?.code && <div className="alert alert-bad">{errorText(error)}</div>}
+          <div className="field">
+            <label htmlFor="rcode">Pairing code</label>
+            <input id="rcode" className="input mono code-input" autoFocus inputMode="numeric"
+                   autoComplete="one-time-code" placeholder="000 000"
+                   value={code} onChange={(e) => setCode(maskCode(e.target.value))} />
+            {fieldErr(error, "code")}
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn-solid" disabled={busy || code.replace(/\s/g, "").length !== 6}>
+              {busy ? "Reconnecting..." : "Reconnect"}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
 function EditReader({ device, onClose, onSaved }) {
   const venues = useVenues();
   const [form, setForm] = useState({ name: device.name, venue: device.venue ?? "" });
@@ -285,6 +355,7 @@ export default function Devices({ embedded = false }) {
   const { rows, loading, error, reload } = useList("/api/devices/", { active: true });
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [repairing, setRepairing] = useState(null);
   const [flash, setFlash] = useState("");
   const [actionError, setActionError] = useState(null);
 
@@ -352,6 +423,10 @@ export default function Devices({ embedded = false }) {
                     <td className="muted">{d.queue_depth} tap{d.queue_depth === 1 ? "" : "s"}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <button className="btn-ghost btn-sm" onClick={() => setEditing(d)}>Edit</button>{" "}
+                      {d.hardware_id && (
+                        <><button className="btn-ghost btn-sm" onClick={() => setRepairing(d)}
+                                  title="For a reader that lost its settings">Re-pair</button>{" "}</>
+                      )}
                       <button className="btn-ghost btn-sm" onClick={() => remove(d)}>Remove</button>
                     </td>
                   </tr>
@@ -363,6 +438,10 @@ export default function Devices({ embedded = false }) {
       </div>
 
       {adding && <AddReader onClose={() => { setAdding(false); reload(); }} onAdded={reload} />}
+      {repairing && (
+        <RepairReader device={repairing} onClose={() => { setRepairing(null); reload(); }}
+                      onDone={reload} />
+      )}
       {editing && (
         <EditReader device={editing} onClose={() => setEditing(null)}
                     onSaved={(d) => { setEditing(null); reload(); note(`${d.name} updated.`); }} />

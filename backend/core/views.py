@@ -471,6 +471,28 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         return Response(self.get_serializer(device).data,
                         status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["post"])
+    def repair(self, request, pk=None):
+        """Step 1 of re-pairing: allow this reader to show a code again."""
+        from deviceapi.pairing import open_repair, REPAIR_WINDOW
+        device = self.get_object()
+        if not device.hardware_id:
+            return Response({"detail": "This reader has no ID yet; it gets one "
+                             "the first time it checks in."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        open_repair(device)
+        audit(request, "device_repair", f"{device.name} {device.hardware_id} opened")
+        return Response({"detail": "Waiting for the reader's pairing code.",
+                         "minutes": int(REPAIR_WINDOW.total_seconds() // 60)})
+
+    @action(detail=True, methods=["post"])
+    def repair_confirm(self, request, pk=None):
+        """Step 2: the code from the reader's screen reconnects it."""
+        from deviceapi.pairing import confirm_repair
+        device = confirm_repair(request, self.get_object())
+        audit(request, "device_repair", f"{device.name} {device.hardware_id} reconnected")
+        return Response(self.get_serializer(device).data)
+
     def perform_update(self, serializer):
         device = serializer.save()
         audit(self.request, "device_update",

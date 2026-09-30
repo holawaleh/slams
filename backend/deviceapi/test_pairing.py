@@ -144,3 +144,62 @@ class PairingTests(TestCase):
         c.force_authenticate(u)
         self.assertEqual(c.get("/api/devices/discover/").status_code, 403)
         self.assertEqual(self.claim(c, self.announce()["code"]).status_code, 403)
+
+
+class RepairTests(TestCase):
+    """A registered reader lost its token (storage wiped, firmware
+    reinstalled). Its own account reconnects it; nobody else can."""
+
+    def setUp(self):
+        cache.clear()
+        self.org, self.admin = admin_of("alpha")
+        announce = reader()
+        self.admin.post("/api/devices/claim/", {
+            "hardware_id": HW, "code": announce()["code"], "name": "LR1"}, format="json")
+        announce()                                     # collects its token
+        self.device = Device.objects.get()
+        self.old_token = self.device.token
+        # Lost everything, including its secret.
+        self.announce = reader(secret="a" * 32)
+
+    def test_lost_token_reader_is_not_offered_a_code_without_repair(self):
+        self.assertEqual(self.announce()["status"], "registered")
+
+    def test_repair_reconnects_the_same_entry(self):
+        r = self.admin.post(f"/api/devices/{self.device.pk}/repair/")
+        self.assertEqual(r.status_code, 200, r.content)
+        code = self.announce()["code"]
+        # Still not listed in anyone's search.
+        self.assertEqual(self.admin.get("/api/devices/discover/").json(), [])
+        r = self.admin.post(f"/api/devices/{self.device.pk}/repair_confirm/",
+                            {"code": code}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        got = self.announce()
+        self.assertEqual(got["status"], "paired")
+        self.device.refresh_from_db()
+        self.assertEqual(got["token"], self.device.token)
+        self.assertNotEqual(self.device.token, self.old_token)   # old copy dead
+        self.assertIsNone(self.device.repair_until)
+        self.assertEqual((Device.objects.count(), self.device.name), (1, "LR1"))
+
+    def test_wrong_code_and_expired_window(self):
+        self.admin.post(f"/api/devices/{self.device.pk}/repair/")
+        code = self.announce()["code"]
+        wrong = "000000" if code != "000000" else "111111"
+        r = self.admin.post(f"/api/devices/{self.device.pk}/repair_confirm/",
+                            {"code": wrong}, format="json")
+        self.assertEqual(r.status_code, 400)
+        Device.objects.update(repair_until=timezone.now() - timedelta(minutes=1))
+        r = self.admin.post(f"/api/devices/{self.device.pk}/repair_confirm/",
+                            {"code": code}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_other_account_cannot_repair_or_claim(self):
+        _, other = admin_of("beta")
+        self.assertEqual(other.post(f"/api/devices/{self.device.pk}/repair/").status_code, 404)
+        self.admin.post(f"/api/devices/{self.device.pk}/repair/")
+        code = self.announce()["code"]
+        r = other.post("/api/devices/claim/", {"hardware_id": HW, "code": code,
+                                               "name": "stolen"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Device.objects.count(), 1)

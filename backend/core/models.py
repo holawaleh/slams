@@ -108,6 +108,9 @@ class Device(TenantModel):
     # is removed, which frees it to be added somewhere else.
     hardware_id = models.CharField(max_length=17, unique=True, null=True,
                                    blank=True)
+    # While set and in the future, this reader may show a pairing code
+    # again so its own account can reconnect it after it lost its token.
+    repair_until = models.DateTimeField(null=True, blank=True)
     # Token stays globally unique - it is the lookup key for an
     # unauthenticated device, so it must resolve to exactly one org.
     token       = models.CharField(max_length=64, unique=True, blank=True)
