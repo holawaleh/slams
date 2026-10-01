@@ -183,3 +183,16 @@ class CorsHandshakeTests(TestCase):
             r = self.client.options("/api/students/", HTTP_ORIGIN="https://evil.example",
                                     HTTP_ACCESS_CONTROL_REQUEST_METHOD="GET")
             self.assertNotIn("access-control-allow-origin", r)
+
+
+class CapacitorOriginTests(TestCase):
+    def test_android_app_origin_is_allowed(self):
+        from django.test import override_settings
+        from django.conf import settings
+        with override_settings(CORS_ALLOW_ALL_ORIGINS=False,
+                               CORS_ALLOWED_ORIGINS=settings.CORS_ALLOWED_ORIGINS):
+            r = self.client.options(
+                "/api/me/", HTTP_ORIGIN="https://localhost",
+                HTTP_ACCESS_CONTROL_REQUEST_METHOD="GET",
+                HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization,x-org")
+            self.assertEqual(r["access-control-allow-origin"], "https://localhost")

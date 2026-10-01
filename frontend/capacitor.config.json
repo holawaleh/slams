@@ -1,0 +1,13 @@
+{
+  "appId": "com.slams.attendance",
+  "appName": "SLAMS",
+  "webDir": "dist",
+  "android": {
+    "adjustMarginsForEdgeToEdge": "auto"
+  },
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": false
+    }
+  }
+}

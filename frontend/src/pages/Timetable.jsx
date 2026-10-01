@@ -371,6 +371,10 @@ export default function Timetable() {
       {slots.length === 0 && !isAdmin ? (
         <div className="card"><Empty message="No lectures on the timetable yet." /></div>
       ) : (
+        <>
+        <p className="phone-only faint" style={{ fontSize: 13, margin: "0 0 8px" }}>
+          Swipe sideways to see the whole day.
+        </p>
         <div className="card tt-card">
           {/* Days down the side, the teaching day across. */}
           <div className="tth" style={{ "--hours": LAST_HOUR - FIRST_HOUR }}>
@@ -422,6 +426,7 @@ export default function Timetable() {
             })}
           </div>
         </div>
+        </>
       )}
 
       {editing && (

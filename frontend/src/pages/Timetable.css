@@ -48,7 +48,7 @@
   background-size:100% var(--hour);
 }
 .tt-day.editable{cursor:copy}
-.tt-day.editable:hover{background-color:color-mix(in srgb,var(--accent) 4%,transparent)}
+@media (hover:hover){.tt-day.editable:hover{background-color:color-mix(in srgb,var(--accent) 4%,transparent)}}
 
 .tt-slot{
   position:absolute;
@@ -65,7 +65,7 @@
   border-radius:6px;
   cursor:pointer;
 }
-.tt-slot:hover:not(:disabled){background:hsl(var(--h) 65% 50% / .28);color:var(--ink)}
+@media (hover:hover){.tt-slot:hover:not(:disabled){background:hsl(var(--h) 65% 50% / .28);color:var(--ink)}}
 .tt-slot:disabled{opacity:1;cursor:default}
 .tt-slot strong{font-size:13px}
 .tt-slot span{color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
@@ -116,7 +116,7 @@
   background-size:calc(100% / var(--hours)) 100%;
 }
 .tth-track.editable{cursor:copy}
-.tth-track.editable:hover{background-color:color-mix(in srgb,var(--accent) 4%,transparent)}
+@media (hover:hover){.tth-track.editable:hover{background-color:color-mix(in srgb,var(--accent) 4%,transparent)}}
 .tth .tt-slot{justify-content:center}
 .tth .tt-slot span{font-size:11.5px}
 

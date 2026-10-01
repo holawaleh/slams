@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
 import ThemeToggle from "./ThemeToggle";
+import { onInstallAvailable, promptInstall } from "../lib/platform";
 import "./Layout.css";
 
 const NAV = [
@@ -55,6 +56,20 @@ export default function Layout() {
   const location = useLocation();
 
   useEffect(() => { setOpen(false); setMenu(false); }, [location.pathname]);
+
+  // "Install app" appears only when the browser offers it.
+  const [canInstall, setCanInstall] = useState(false);
+  useEffect(() => onInstallAvailable(setCanInstall), []);
+
+  // Say so when the phone loses its connection, rather than letting
+  // every save fail with a vague error.
+  const [online, setOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const up = () => setOnline(true), down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => { window.removeEventListener("online", up); window.removeEventListener("offline", down); };
+  }, []);
 
   function togglePin() {
     const next = !pinned;
@@ -154,6 +169,11 @@ export default function Layout() {
                   <button className="menu-item" onClick={() => navigate("/settings")}>
                     Settings
                   </button>
+                  {canInstall && (
+                    <button className="menu-item" onClick={() => { setMenu(false); promptInstall(); }}>
+                      Install app
+                    </button>
+                  )}
                   {orgs.length > 1 && (
                     <>
                       <div className="menu-sep" />
@@ -185,6 +205,13 @@ export default function Layout() {
             )}
           </div>
         </header>
+
+        {!online && (
+          <div className="offline-bar" role="status">
+            You are offline. Pages you have open still show, but nothing can be
+            saved until the connection is back.
+          </div>
+        )}
 
         <div className="content">
           <Outlet />

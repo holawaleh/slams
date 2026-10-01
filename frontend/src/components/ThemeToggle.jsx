@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { setNativeBars } from "../lib/platform";
 
 function current() {
   return document.documentElement.dataset.theme === "light" ? "light" : "dark";
@@ -12,6 +13,11 @@ export default function ThemeToggle({ floating = false }) {
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem("theme", next); } catch { /* private mode */ }
     setTheme(next);
+    // The phone's status bar / browser chrome follows the theme too.
+    const bar = next === "light" ? "#f4f5fa" : "#1b1f2e";
+    document.querySelectorAll('meta[name="theme-color"]')
+            .forEach((m) => m.setAttribute("content", bar));
+    setNativeBars(next);
   }
 
   const label = theme === "light" ? "Switch to dark theme" : "Switch to light theme";

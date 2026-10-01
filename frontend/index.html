@@ -2,9 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover lets the layout use the whole screen on phones
+         with a notch; the CSS keeps content inside the safe area. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>SLAMS</title>
+    <meta name="description" content="Lecture attendance by card tap: students, courses, timetable and reports." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1b1f2e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f4f5fa" media="(prefers-color-scheme: light)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="SLAMS" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
     <script>
       // Set the theme before first paint so the page never flashes.
       (function () {
@@ -15,6 +27,11 @@
             ? "light" : "dark";
         }
         document.documentElement.dataset.theme = t;
+        // Match the browser / status bar colour to the chosen theme.
+        var c = t === "light" ? "#f4f5fa" : "#1b1f2e";
+        document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) {
+          m.setAttribute("content", c);
+        });
       })();
     </script>
   </head>

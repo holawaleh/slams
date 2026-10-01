@@ -64,7 +64,8 @@ if _db_url:
 else:
     DATABASES = {"default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        # SQLITE_PATH lets a test run use a throwaway database file.
+        "NAME": os.getenv("SQLITE_PATH") or BASE_DIR / "db.sqlite3",
     }}
 
 AUTHENTICATION_BACKENDS = [
@@ -114,6 +115,11 @@ REST_FRAMEWORK = {
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOWED_ORIGINS = [o.strip() for o in
                         os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+# The Android (and iOS) app built with Capacitor serves its pages from
+# these origins. Every API request still needs a valid sign-in token;
+# this only lets the app read the responses.
+CORS_ALLOWED_ORIGINS += [o for o in ("https://localhost", "capacitor://localhost")
+                         if o not in CORS_ALLOWED_ORIGINS]
 
 # Custom headers must be listed, even with all origins allowed - the
 # browser preflight rejects anything not named here.

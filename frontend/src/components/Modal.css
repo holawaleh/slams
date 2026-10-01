@@ -1,4 +1,4 @@
-﻿.modal-scrim{
+.modal-scrim{
   position:fixed;inset:0;
   background:rgba(0,0,0,.6);
   display:flex;align-items:center;justify-content:center;
@@ -8,9 +8,29 @@
 .modal{
   width:100%;
   max-height:88vh;
+  max-height:88dvh;            /* the visible height, with the phone's bars */
   overflow-y:auto;
+  overscroll-behavior:contain; /* scrolling the dialog never scrolls the page */
   box-shadow:var(--shadow);
   padding:22px;
 }
 .modal-head{margin-bottom:18px}
 .modal-x{padding:6px 8px;border:0}
+
+/* Phones: a sheet that rises from the bottom, full width, with its
+   buttons in reach of the thumb and clear of the gesture bar. */
+@media (max-width:600px){
+  .modal-scrim{align-items:flex-end;padding:0}
+  .modal{
+    max-width:none !important;
+    max-height:92dvh;
+    border-radius:16px 16px 0 0;
+    border-bottom:0;
+    padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));
+    animation:sheet-up .2s ease-out;
+  }
+  .modal-head{position:sticky;top:-18px;margin:-18px -16px 14px;padding:16px 16px 12px;
+    background:var(--card);z-index:1;border-bottom:1px solid var(--line-soft)}
+}
+@keyframes sheet-up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.modal{animation:none}}
