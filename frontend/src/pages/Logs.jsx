@@ -158,7 +158,7 @@ export function AdminActions() {
   return (
     <>
       <div className="row filters">
-        <input className="input" value={query} placeholder="Search by person, student, card, reader, course or action"
+        <input className="input" value={query} placeholder="Search by who did it, or anything in the action taken"
                onChange={(e) => setQuery(e.target.value)} />
       </div>
       <ErrorBox error={error} />
@@ -168,19 +168,16 @@ export function AdminActions() {
         ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>When</th><th>Done by</th><th>Action</th><th>Involves</th><th>Details</th></tr></thead>
+              <thead><tr><th>When</th><th>Done by</th><th>Action taken</th></tr></thead>
               <tbody>
                 {rows.map((a) => (
                   <tr key={a.id}>
                     <td className="muted" style={{ whiteSpace: "nowrap" }}>{when(a.created_at, org?.timezone)}</td>
                     <td>{a.actor_name || <span className="faint">{a.action === "sign_in_failed" ? "unknown" : "-"}</span>}</td>
-                    <td>
-                      <span className={WARN.has(a.action) ? "pill pill-warn" : ""}>
-                        {ACTIONS[a.action] ?? a.action}
-                      </span>
+                    <td style={WARN.has(a.action) ? { color: "var(--warn)" } : null}
+                        title={ACTIONS[a.action] ?? a.action}>
+                      {a.description}
                     </td>
-                    <td><strong style={{ fontWeight: 500 }}>{a.subject || "-"}</strong></td>
-                    <td className="muted" style={{ wordBreak: "break-word" }}>{a.detail}</td>
                   </tr>
                 ))}
               </tbody>

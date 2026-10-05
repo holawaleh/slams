@@ -86,3 +86,35 @@ class AuditTests(TestCase):
         self.api.post("/api/students/", {"full_name": "Ada Obi", "matric_no": "M1"}, format="json")
         row = self.api.get("/api/audit/", {"search": "Ada"}).json()["results"][0]
         self.assertEqual((row["actor_name"], row["subject"]), ("Bola Ade (bola, admin)", "Ada Obi (M1)"))
+
+
+class AuditSentenceTests(AuditTests):
+    """The Audit log shows each entry as the action taken, in words."""
+
+    def sentences(self):
+        return [r["description"] for r in self.api.get("/api/audit/").json()["results"]]
+
+    def test_actions_read_as_sentences(self):
+        sid = self.api.post("/api/students/", {"full_name": "Ada Obi", "matric_no": "M1",
+                                               "department": "CSC", "level": "200"},
+                            format="json").json()["id"]
+        cid = self.api.post("/api/courses/", {"code": "csc101", "title": "Intro"},
+                            format="json").json()["id"]
+        self.api.post("/api/enrollments/", {"student": sid, "course": cid,
+                                            "term": self.org.term}, format="json")
+        self.api.delete(f"/api/students/{sid}/")
+        got = self.sentences()
+        self.assertIn("Added student Ada Obi (M1), CSC, level 200", got)
+        self.assertIn("Added course CSC101 - Intro; no lecturer", got)
+        self.assertIn(f"Enrolled Ada Obi (M1) on course CSC101 ({self.org.term})", got)
+        self.assertIn("Deleted student Ada Obi (M1)", got)
+
+    def test_staff_role_sentence(self):
+        owner = User.objects.create_user("own", password=PW, first_name="Ola", last_name="Owner")
+        Membership.objects.create(user=owner, org=self.org, role="owner")
+        c = APIClient(); c.force_authenticate(owner)
+        m = Membership.objects.get(user=self.admin)
+        c.patch(f"/api/members/{m.pk}/", {"role": "lecturer"}, format="json")
+        row = c.get("/api/audit/").json()["results"][0]
+        self.assertEqual((row["actor_name"], row["description"]),
+                         ("Ola Owner (own, owner)", "Changed the role of Bola Ade (bola) from admin to lecturer"))
