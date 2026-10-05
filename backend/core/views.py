@@ -32,26 +32,59 @@ def client_ip(request):
     return fwd.split(",")[0].strip() if fwd else request.META.get("REMOTE_ADDR")
 
 
-def destroy_or_conflict(view, request, what):
-    """Delete, or explain why not. Rows with attendance history are
-    protected, and a raw ProtectedError would surface as a 500."""
+def destroy_or_conflict(view, request, what, label):
+    """Delete, or explain why not, and record who deleted what. Rows with
+    attendance history are protected, and a raw ProtectedError would
+    surface as a 500. label(obj) names the row for the audit log."""
+    subject = label(view.get_object())
     try:
-        return viewsets.ModelViewSet.destroy(view, request)
+        response = viewsets.ModelViewSet.destroy(view, request)
     except ProtectedError:
         return Response(
             {"detail": f"This {what} has lecture or attendance history and "
                        f"cannot be deleted."},
             status=status.HTTP_409_CONFLICT)
+    audit(request, f"{what}_delete", subject=subject)
+    return response
 
 
-def audit(request, action_name, detail):
-    m = get_membership(request)
-    if m is None:
+def person_label(user, role=None):
+    """'Ada Obi (ada, admin)', or just the username when there is no name."""
+    name = user.get_full_name().strip()
+    inner = ", ".join(p for p in (user.username if name else None, role) if p)
+    return f"{name or user.username}{f' ({inner})' if inner else ''}"
+
+
+def audit(request, action_name, detail="", subject="", user=None, org=None):
+    """Record who did what to whom.
+
+    subject is who or what the action was about (see the describe_*
+    helpers). user/org are for actions where the caller is not signed in
+    yet, such as signing in."""
+    m = get_membership(request) if user is None else None
+    actor = user or (request.user if request.user.is_authenticated else None)
+    org = org or (m.org if m else None)
+    if org is None:
         return
+    role = m.role if m else None
+    if user is not None:
+        mem = user.memberships.filter(org=org).first()
+        role = mem.role if mem else None
     AuditLog.objects.create(
-        org=m.org,
-        actor=request.user if request.user.is_authenticated else None,
-        action=action_name, detail=detail, ip=client_ip(request))
+        org=org, actor=actor,
+        actor_label=person_label(actor, role)[:200] if actor else "",
+        action=action_name, subject=str(subject)[:200], detail=detail,
+        ip=client_ip(request))
+
+
+def describe_card(card):
+    who = (card.student.full_name if card.student_id
+           else card.holder.get_full_name() if card.holder_id else "")
+    return f"card {card.uid}" + (f" ({who})" if who else "")
+
+
+def describe_device(device):
+    return f"reader {device.name}" + (f" ({device.hardware_id})" if device.hardware_id else "")
 
 
 def bind_card(request, org, uid, student, replace=False):
@@ -74,8 +107,8 @@ def bind_card(request, org, uid, student, replace=False):
             old.active = False
             old.revoked_at = timezone.now()
             old.save(update_fields=["active", "revoked_at"])
-            audit(request, "card_revoke",
-                  f"uid={old.uid} replaced for {student_label(student)}")
+            audit(request, "card_revoke", f"replaced by card {uid}",
+                  subject=f"card {old.uid} ({student_label(student)})")
 
     if card is None:
         card = Card.objects.create(org=org, uid=uid, student=student)
@@ -83,7 +116,7 @@ def bind_card(request, org, uid, student, replace=False):
         card.student, card.is_admin, card.active = student, False, True
         card.revoked_at = None
         card.save()
-    audit(request, "card_bind", f"uid={uid} -> {student_label(student)}")
+    audit(request, "card_bind", f"card {uid}", subject=student_label(student))
     return card
 
 
@@ -127,7 +160,9 @@ class StudentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         uid = serializer.validated_data.get("card_uid")
         student = serializer.save()
-        audit(self.request, "student_create", student_label(student))
+        audit(self.request, "student_create",
+              ", ".join(x for x in (student.department, student.level and f"level {student.level}") if x),
+              subject=student_label(student))
         if uid:
             bind_card(self.request, self.org, uid, student)
 
@@ -135,12 +170,14 @@ class StudentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     def perform_update(self, serializer):
         uid = serializer.validated_data.get("card_uid")
         student = serializer.save()
-        audit(self.request, "student_update", student_label(student))
+        changed = ", ".join(sorted(k for k in serializer.validated_data if k != "card_uid"))
+        audit(self.request, "student_update", f"changed: {changed}" if changed else "",
+              subject=student_label(student))
         if uid and not student.cards.filter(uid=uid, active=True).exists():
             bind_card(self.request, self.org, uid, student, replace=True)
 
     def destroy(self, request, *args, **kwargs):
-        return destroy_or_conflict(self, request, "student")
+        return destroy_or_conflict(self, request, "student", student_label)
 
     @action(detail=False)
     def levels(self, request):
@@ -249,23 +286,23 @@ class CardViewSet(TenantScopedMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         card = serializer.save()
-        audit(self.request, "card_create",
-              f"uid={card.uid} student={card.student_id} admin={card.is_admin}")
+        audit(self.request, "card_create", "admin card" if card.is_admin else "",
+              subject=describe_card(card))
 
     def perform_update(self, serializer):
         card = serializer.save()
         if card.active and card.revoked_at:
             card.revoked_at = None
             card.save(update_fields=["revoked_at"])
-        audit(self.request, "card_update",
-              f"uid={card.uid} student={card.student_id} active={card.active}")
+        audit(self.request, "card_update", "active" if card.active else "inactive",
+              subject=describe_card(card))
 
     def perform_destroy(self, instance):
         # Cards are revoked, never deleted, so history stays intact.
         instance.active = False
         instance.revoked_at = timezone.now()
         instance.save()
-        audit(self.request, "card_revoke", f"uid={instance.uid}")
+        audit(self.request, "card_revoke", subject=describe_card(instance))
 
     @action(detail=False)
     def summary(self, request):
@@ -372,8 +409,16 @@ class VenueViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     search_fields = ["code", "name"]
     ordering = ["code"]
 
+    def perform_create(self, serializer):
+        venue = serializer.save()
+        audit(self.request, "venue_create", venue.name, subject=f"venue {venue.code}")
+
+    def perform_update(self, serializer):
+        venue = serializer.save()
+        audit(self.request, "venue_update", venue.name, subject=f"venue {venue.code}")
+
     def destroy(self, request, *args, **kwargs):
-        return destroy_or_conflict(self, request, "venue")
+        return destroy_or_conflict(self, request, "venue", lambda v: f"venue {v.code}")
 
 
 class CourseViewSet(TenantScopedMixin, viewsets.ModelViewSet):
@@ -386,8 +431,23 @@ class CourseViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     search_fields = ["code", "title"]
     ordering = ["code"]
 
+    @staticmethod
+    def _lecturer(course):
+        return (f"lecturer {course.lecturer.get_full_name() or course.lecturer.username}"
+                if course.lecturer_id else "no lecturer")
+
+    def perform_create(self, serializer):
+        course = serializer.save()
+        audit(self.request, "course_create", f"{course.title}; {self._lecturer(course)}",
+              subject=f"course {course.code}")
+
+    def perform_update(self, serializer):
+        course = serializer.save()
+        audit(self.request, "course_update", f"{course.title}; {self._lecturer(course)}",
+              subject=f"course {course.code}")
+
     def destroy(self, request, *args, **kwargs):
-        return destroy_or_conflict(self, request, "course")
+        return destroy_or_conflict(self, request, "course", lambda c: f"course {c.code}")
 
     @action(detail=True)
     def roster(self, request, pk=None):
@@ -409,6 +469,16 @@ class EnrollmentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     search_fields = ["student__matric_no", "student__full_name"]
     ordering = ["student__matric_no"]
 
+    def perform_create(self, serializer):
+        e = serializer.save()
+        audit(self.request, "enroll_add", f"course {e.course.code} ({e.term})",
+              subject=student_label(e.student))
+
+    def perform_destroy(self, instance):
+        audit(self.request, "enroll_remove", f"course {instance.course.code} ({instance.term})",
+              subject=student_label(instance.student))
+        instance.delete()
+
     @action(detail=False, methods=["post"])
     def bulk(self, request):
         """Enrol many students onto one course in a single query."""
@@ -427,7 +497,11 @@ class EnrollmentViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         objs = [Enrollment(org=self.org, course_id=course_id,
                            student_id=i, term=term) for i in valid]
         created = Enrollment.objects.bulk_create(objs, ignore_conflicts=True)
-        audit(request, "enroll_bulk", f"course={course_id} n={len(ids)}")
+        course = Course.objects.get(org=self.org, id=course_id)
+        names = list(Student.objects.filter(id__in=valid).values_list("full_name", flat=True)[:5])
+        audit(request, "enroll_bulk",
+              f"{len(valid)} student(s): {', '.join(names)}{' ...' if len(valid) > 5 else ''} ({term})",
+              subject=f"course {course.code}")
         return Response({"requested": len(ids), "created": len(created)},
                         status=status.HTTP_201_CREATED)
 
@@ -450,7 +524,7 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         self.check_plan_limit()
         device = serializer.save()
-        audit(self.request, "device_add", f"{device.name} {device.hardware_id}")
+        audit(self.request, "device_add", subject=describe_device(device))
 
     @action(detail=False)
     def discover(self, request):
@@ -467,7 +541,7 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.check_plan_limit()
         device = claim(request, self.org, serializer)
-        audit(request, "device_add", f"{device.name} {device.hardware_id} (paired)")
+        audit(request, "device_add", "added by pairing code", subject=describe_device(device))
         return Response(self.get_serializer(device).data,
                         status=status.HTTP_201_CREATED)
 
@@ -481,7 +555,7 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
                              "the first time it checks in."},
                             status=status.HTTP_400_BAD_REQUEST)
         open_repair(device)
-        audit(request, "device_repair", f"{device.name} {device.hardware_id} opened")
+        audit(request, "device_repair", "re-pairing started", subject=describe_device(device))
         return Response({"detail": "Waiting for the reader's pairing code.",
                          "minutes": int(REPAIR_WINDOW.total_seconds() // 60)})
 
@@ -490,14 +564,15 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         """Step 2: the code from the reader's screen reconnects it."""
         from deviceapi.pairing import confirm_repair
         device = confirm_repair(request, self.get_object())
-        audit(request, "device_repair", f"{device.name} {device.hardware_id} reconnected")
+        audit(request, "device_repair", "reconnected", subject=describe_device(device))
         return Response(self.get_serializer(device).data)
 
     def perform_update(self, serializer):
         was_placed = serializer.instance.venue_id is not None
         device = serializer.save()
         audit(self.request, "device_update",
-              f"{device.name} {device.hardware_id}")
+              f"venue {device.venue.code}" if device.venue_id else "no venue",
+              subject=describe_device(device))
         # First placement: every tap it took so far happened in this room,
         # and none could count because it had no venue. Judge them again.
         # (A reader moved between rooms is not re-judged: its earlier taps
@@ -507,8 +582,8 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
             checked, counted = recheck_taps(TapEvent.objects.filter(
                 org=self.org, device=device, outcome__in=RECHECKABLE))
             if checked:
-                audit(self.request, "taps_recheck",
-                      f"{device.name} placed in {device.venue.code}: "
+                audit(self.request, "taps_recheck", subject=describe_device(device), detail=
+                      f"placed in {device.venue.code}: "
                       f"{checked} checked, {counted} now counted")
 
     def perform_destroy(self, instance):
@@ -523,13 +598,14 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         instance.name = (f"{instance.name} (removed "
                          f"{timezone.now():%Y-%m-%d %H:%M})")[:64]
         instance.save()
-        audit(self.request, "device_remove", f"{instance.name} {hw}")
+        audit(self.request, "device_remove", "freed for another account",
+              subject=f"reader {instance.name}" + (f" ({hw})" if hw else ""))
 
     @action(detail=True, methods=["post"])
     def reveal_token(self, request, pk=None):
         """Shows the token once, for provisioning. Always audited."""
         device = self.get_object()
-        audit(request, "device_token_reveal", f"device={device.name}")
+        audit(request, "device_token_reveal", subject=describe_device(device))
         return Response({"name": device.name, "token": device.token})
 
     @action(detail=True, methods=["post"])
@@ -538,7 +614,7 @@ class DeviceViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         device = self.get_object()
         device.token = secrets.token_urlsafe(32)
         device.save()
-        audit(request, "device_token_rotate", f"device={device.name}")
+        audit(request, "device_token_rotate", subject=describe_device(device))
         return Response({"name": device.name, "token": device.token})
 
 
@@ -563,16 +639,16 @@ class TimetableSlotViewSet(TenantScopedMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         slot = serializer.save()
-        audit(self.request, "slot_create", self._describe(slot))
+        audit(self.request, "slot_create", self._describe(slot), subject=f"course {slot.course.code}")
 
     def perform_update(self, serializer):
         slot = serializer.save()
         self._drop_future_sessions(slot)
-        audit(self.request, "slot_update", self._describe(slot))
+        audit(self.request, "slot_update", self._describe(slot), subject=f"course {slot.course.code}")
 
     def perform_destroy(self, instance):
         self._drop_future_sessions(instance)
-        audit(self.request, "slot_delete", self._describe(instance))
+        audit(self.request, "slot_delete", self._describe(instance), subject=f"course {instance.course.code}")
         instance.delete()
 
     @staticmethod
@@ -613,7 +689,8 @@ class ClassSessionViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         session.opened_by = request.user
         session.roster_version += 1
         session.save()
-        audit(request, "session_open", f"session={session.id}")
+        audit(request, "session_open", f"{session.starts_at:%Y-%m-%d %H:%M} in {session.venue.code}",
+              subject=f"course {session.course.code}")
         return Response(self.get_serializer(session).data)
 
     @action(detail=True, methods=["post"])
@@ -622,7 +699,8 @@ class ClassSessionViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         self.check_object_permissions(request, session)
         session.status = "closed"
         session.save()
-        audit(request, "session_close", f"session={session.id}")
+        audit(request, "session_close", f"{session.starts_at:%Y-%m-%d %H:%M} in {session.venue.code}",
+              subject=f"course {session.course.code}")
         return Response(self.get_serializer(session).data)
 
     @action(detail=True)
@@ -712,7 +790,7 @@ class AuditLogViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsOrgAdmin]
     pagination_class = StandardPagination
     filterset_fields = ["action", "actor"]
-    search_fields = ["action", "detail", "actor__username"]
+    search_fields = ["action", "subject", "detail", "actor_label", "actor__username"]
     ordering = ["-created_at"]
 
 

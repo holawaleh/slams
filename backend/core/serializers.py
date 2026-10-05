@@ -374,13 +374,18 @@ class AttendanceRecordSerializer(TenantSerializer):
 
 
 class AuditLogSerializer(TenantSerializer):
-    actor_name = serializers.CharField(source="actor.username", read_only=True)
+    # Who did it: the name saved with the entry, so it survives the
+    # account being removed; older entries fall back to the username.
+    actor_name = serializers.SerializerMethodField()
 
     class Meta:
         model = AuditLog
-        fields = ("id", "actor", "actor_name", "action", "detail",
+        fields = ("id", "actor", "actor_name", "action", "subject", "detail",
                   "ip", "created_at")
         read_only_fields = fields
+
+    def get_actor_name(self, obj):
+        return obj.actor_label or (obj.actor.username if obj.actor_id else "")
 
 
 class BindCardSerializer(serializers.Serializer):

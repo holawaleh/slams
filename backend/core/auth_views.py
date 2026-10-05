@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .tenancy import Organization, Membership, Invitation
 from .auth_serializers import (RegisterSerializer, AcceptInviteSerializer,
@@ -16,7 +17,7 @@ from .auth_serializers import (RegisterSerializer, AcceptInviteSerializer,
 from .permissions import IsOrgMember, IsOrgAdmin, get_membership
 from . import account
 from .pagination import LargePagination
-from .views import audit
+from .views import audit, person_label
 
 
 class SignupThrottle(AnonRateThrottle):
@@ -27,6 +28,42 @@ class SignupThrottle(AnonRateThrottle):
 def tokens_for(user):
     refresh = RefreshToken.for_user(user)
     return {"refresh": str(refresh), "access": str(refresh.access_token)}
+
+
+class LoginView(TokenObtainPairView):
+    """Sign-in, recorded in the organisation's audit log: who signed in,
+    and failed attempts on a real account (a run of those is worth
+    seeing). Unknown usernames are not logged - there is no organisation
+    to log them in, and nothing to protect."""
+
+    def post(self, request, *args, **kwargs):
+        # A wrong password is raised (AuthenticationFailed), not returned:
+        # record it, then let DRF turn it into the 401 as usual.
+        try:
+            response = super().post(request, *args, **kwargs)
+        except Exception:
+            self._record(request, ok=False)
+            raise
+        self._record(request, ok=response.status_code == 200)
+        return response
+
+    def _record(self, request, ok):
+        from django.contrib.auth.models import User
+        from .models import AuditLog
+        from .views import client_ip
+        name = str(request.data.get("username", "")).strip()
+        user = User.objects.filter(username__iexact=name).first() if name else None
+        if user is not None:
+            mem = (user.memberships.select_related("org").filter(is_default=True).first()
+                   or user.memberships.select_related("org").first())
+            if mem is not None:
+                AuditLog.objects.create(
+                    org=mem.org, actor=user if ok else None,
+                    actor_label=person_label(user, mem.role) if ok else "",
+                    action="sign_in" if ok else "sign_in_failed",
+                    subject=person_label(user, mem.role),
+                    detail="" if ok else "wrong password",
+                    ip=client_ip(request))
 
 
 class RegisterView(APIView):
@@ -117,7 +154,12 @@ class OrganizationView(APIView):
                             status=status.HTTP_403_FORBIDDEN)
         s = OrganizationSerializer(m.org, data=request.data, partial=True)
         s.is_valid(raise_exception=True)
+        before = {k: getattr(m.org, k) for k in s.validated_data}
         s.save()
+        changed = [f"{k}: {before[k]!r} -> {v!r}" for k, v in s.validated_data.items()
+                   if before[k] != v]
+        if changed:
+            audit(request, "org_update", "; ".join(changed), subject=m.org.name)
         return Response(s.data)
 
 
@@ -137,7 +179,7 @@ class MembershipViewSet(mixins.ListModelMixin, mixins.UpdateModelMixin,
     def create(self, request):
         """Add a staff member with a temporary password."""
         m = account.add_staff(request)
-        audit(request, "staff_add", f"{m.user.username} as {m.role}")
+        audit(request, "staff_add", f"as {m.role}", subject=person_label(m.user))
         return Response(MembershipSerializer(m).data,
                         status=status.HTTP_201_CREATED)
 
@@ -147,13 +189,13 @@ class MembershipViewSet(mixins.ListModelMixin, mixins.UpdateModelMixin,
         account.check_role_change(self.request, target, new_role)
         serializer.save()
         if new_role != target.role:
-            audit(self.request, "staff_role",
-                  f"{target.user.username}: {target.role} -> {new_role}")
+            audit(self.request, "staff_role", f"{target.role} -> {new_role}",
+                  subject=person_label(target.user))
 
     def perform_destroy(self, instance):
         account.check_remove(self.request, instance)
-        audit(self.request, "staff_remove",
-              f"{instance.user.username} ({instance.role})")
+        audit(self.request, "staff_remove", f"was {instance.role}",
+              subject=person_label(instance.user))
         instance.delete()
 
     @action(detail=True, methods=["post"])
@@ -162,7 +204,8 @@ class MembershipViewSet(mixins.ListModelMixin, mixins.UpdateModelMixin,
         have forgotten theirs."""
         target = self.get_object()
         account.reset_staff_password(request, target)
-        audit(request, "staff_password", target.user.username)
+        audit(request, "staff_password", "temporary password set",
+              subject=person_label(target.user, target.role))
         return Response({"detail": "Password changed."})
 
     @action(detail=False, methods=["post"])

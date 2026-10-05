@@ -133,7 +133,20 @@ const ACTIONS = {
   session_open: "Lecture opened", session_close: "Lecture closed",
   staff_add: "Staff added", staff_role: "Staff role changed",
   staff_remove: "Staff removed", staff_password: "Staff password reset",
+  student_delete: "Student deleted",
+  course_create: "Course added", course_update: "Course edited", course_delete: "Course deleted",
+  venue_create: "Venue added", venue_update: "Venue edited", venue_delete: "Venue deleted",
+  enroll_add: "Student enrolled", enroll_remove: "Enrolment removed",
+  device_repair: "Reader re-paired", taps_recheck: "Taps re-checked",
+  org_update: "Organisation settings changed",
+  profile_update: "Profile edited", password_change: "Password changed",
+  sign_in: "Signed in", sign_in_failed: "Failed sign-in",
 };
+
+// Actions worth noticing at a glance.
+const WARN = new Set(["sign_in_failed", "card_revoke", "student_delete", "course_delete",
+                      "venue_delete", "device_remove", "staff_remove", "staff_role",
+                      "device_token_reveal", "device_token_rotate"]);
 
 export function AdminActions() {
   const { org } = useAuth();
@@ -145,7 +158,7 @@ export function AdminActions() {
   return (
     <>
       <div className="row filters">
-        <input className="input" value={query} placeholder="Search actions, people or details"
+        <input className="input" value={query} placeholder="Search by person, student, card, reader, course or action"
                onChange={(e) => setQuery(e.target.value)} />
       </div>
       <ErrorBox error={error} />
@@ -155,13 +168,18 @@ export function AdminActions() {
         ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead>
+              <thead><tr><th>When</th><th>Done by</th><th>Action</th><th>Involves</th><th>Details</th></tr></thead>
               <tbody>
                 {rows.map((a) => (
                   <tr key={a.id}>
                     <td className="muted" style={{ whiteSpace: "nowrap" }}>{when(a.created_at, org?.timezone)}</td>
-                    <td>{a.actor_name || "-"}</td>
-                    <td>{ACTIONS[a.action] ?? a.action}</td>
+                    <td>{a.actor_name || <span className="faint">{a.action === "sign_in_failed" ? "unknown" : "-"}</span>}</td>
+                    <td>
+                      <span className={WARN.has(a.action) ? "pill pill-warn" : ""}>
+                        {ACTIONS[a.action] ?? a.action}
+                      </span>
+                    </td>
+                    <td><strong style={{ fontWeight: 500 }}>{a.subject || "-"}</strong></td>
                     <td className="muted" style={{ wordBreak: "break-word" }}>{a.detail}</td>
                   </tr>
                 ))}

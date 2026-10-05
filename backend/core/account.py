@@ -77,6 +77,9 @@ class ProfileView(APIView):
         if "email" in s.validated_data:
             u.email = s.validated_data["email"].strip().lower()
         u.save(update_fields=["first_name", "last_name", "email"])
+        from .views import audit, person_label
+        audit(request, "profile_update", ", ".join(sorted(s.validated_data)),
+              subject=person_label(u))
         return Response({"full_name": u.get_full_name(), "email": u.email,
                          "first_name": u.first_name, "last_name": u.last_name})
 
@@ -102,6 +105,9 @@ class ChangePasswordView(APIView):
                             status=status.HTTP_400_BAD_REQUEST)
         request.user.set_password(new)
         request.user.save(update_fields=["password"])
+        from .views import audit, person_label
+        audit(request, "password_change", "changed their own password",
+              subject=person_label(request.user))
         return Response({"detail": "Password changed."})
 
 

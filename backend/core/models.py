@@ -223,7 +223,13 @@ class AttendanceRecord(TenantModel):
 
 class AuditLog(TenantModel):
     actor      = models.ForeignKey(User, null=True, on_delete=models.SET_NULL)
+    # Who did it, as they were at the time: "Ada Obi (ada, admin)". Kept
+    # as text so the record still says who it was after the account goes.
+    actor_label = models.CharField(max_length=200, blank=True)
     action     = models.CharField(max_length=32)
+    # Who or what it was done to: a student, staff member, card, reader,
+    # course. Readable on its own, and searchable.
+    subject    = models.CharField(max_length=200, blank=True)
     detail     = models.TextField(blank=True)
     ip         = models.GenericIPAddressField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
