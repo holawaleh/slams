@@ -65,4 +65,9 @@ class DeviceTokenAuthentication(authentication.BaseAuthentication):
         device.hardware_id = hw
 
     def authenticate_header(self, request):
-        return self.keyword
+        # No WWW-Authenticate challenge, so a refused token is a plain 403.
+        # A 401 with "WWW-Authenticate: Device" makes the ESP-IDF HTTP
+        # client try to handle that scheme itself, fail with
+        # ESP_ERR_NOT_SUPPORTED and hide the status from the firmware, so
+        # a removed reader never learned to go back to pairing.
+        return None

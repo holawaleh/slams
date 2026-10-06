@@ -93,6 +93,17 @@ static int request(const char *path, esp_http_client_method_t method,
 
     int64_t t0 = slam_uptime_ms();
     esp_err_t err = esp_http_client_perform(s_client);
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        // A 401 carrying a WWW-Authenticate scheme the client does not
+        // know ends here, with the status already read. It is an answer
+        // (the token was refused), not a broken connection.
+        int status = esp_http_client_get_status_code(s_client);
+        if (status > 0) {
+            s_last_rtt_ms = slam_uptime_ms() - t0;
+            esp_http_client_close(s_client);
+            return status;
+        }
+    }
     if (err != ESP_OK) {
         // The kept-alive connection can die underneath us - most often
         // when WiFi reconnects - and the next request then fails writing

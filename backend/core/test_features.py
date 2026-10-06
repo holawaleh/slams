@@ -265,13 +265,20 @@ class ReaderOwnershipTests(TestCase):
     def test_token_only_works_from_its_own_reader(self):
         dev = Device.objects.get(pk=self.add(self.a).json()["id"])
         self.assertEqual(self.hello(dev.token, self.HW).status_code, 200)
-        self.assertEqual(self.hello(dev.token, "11:22:33:44:55:66").status_code, 401)
-        self.assertEqual(self.hello(dev.token, "").status_code, 401)
+        self.assertEqual(self.hello(dev.token, "11:22:33:44:55:66").status_code, 403)
+        self.assertEqual(self.hello(dev.token, "").status_code, 403)
+
+    def test_refused_token_has_no_auth_challenge(self):
+        # ESP-IDF's HTTP client chokes on "WWW-Authenticate: Device" and
+        # hides the status, so a removed reader never went back to pairing.
+        r = self.hello("no-such-token", self.HW)
+        self.assertEqual(r.status_code, 403)
+        self.assertNotIn("WWW-Authenticate", r.headers)
 
     def test_old_entry_claims_its_reader_unless_registered_elsewhere(self):
         legacy = Device.objects.create(org=self.org_b, name="Old")
         self.add(self.a)                                 # HW now belongs to A
-        self.assertEqual(self.hello(legacy.token, self.HW).status_code, 401)
+        self.assertEqual(self.hello(legacy.token, self.HW).status_code, 403)
         self.assertEqual(self.hello(legacy.token, "11:22:33:44:55:66").status_code, 200)
         legacy.refresh_from_db()
         self.assertEqual(legacy.hardware_id, "11:22:33:44:55:66")

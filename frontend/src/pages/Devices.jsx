@@ -50,6 +50,14 @@ function AddReader({ onClose, onAdded }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [device, setDevice] = useState(null);
+  // Nothing found for a while: say why that usually is, instead of
+  // leaving "Searching..." on screen with no way forward.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (step !== "search") return undefined;
+    const t = setTimeout(() => setSlow(true), 15000);
+    return () => clearTimeout(t);
+  }, [step]);
 
   // Searching: ask every 3 seconds while the list is on screen.
   useEffect(() => {
@@ -210,6 +218,24 @@ function AddReader({ onClose, onAdded }) {
           </button>
         ))}
       </div>
+
+      {slow && found?.length === 0 && (
+        <div className="alert alert-bad" style={{ marginTop: 14, marginBottom: 0 }}>
+          <strong>No reader found yet.</strong> Check the reader's screen:
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            <li><b>Pair code</b> and 6 digits: it is online. Your phone or computer is
+              probably on a different connection (for example mobile data), so use
+              {" "}<b>Enter its reader ID</b> below. The ID is shown on the reader at power-on.</li>
+            <li><b>SLAM-…</b> and a password: it has no WiFi. Join that network and open
+              {" "}192.168.4.1 to connect it.</li>
+            <li><b>Already added</b>: it still belongs to an account. Use Re-pair, or
+              remove it from that account first.</li>
+            <li><b>Swipe card</b> or <b>WiFi connected</b> only: it cannot reach the
+              server. Check the WiFi has internet access, and the server address on its
+              setup page.</li>
+          </ul>
+        </div>
+      )}
 
       {manual ? (
         <form className="row" style={{ marginTop: 14 }}
