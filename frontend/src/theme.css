@@ -409,3 +409,12 @@ code,.mono{overflow-wrap:anywhere}
 }
 .phone-only{display:none}
 @media (max-width:820px){.phone-only{display:block}}
+
+/* platform admin */
+.link-btn{background:none;border:0;padding:0;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+@media (hover:hover){.link-btn:hover{color:var(--accent);background:none}}
+.btn-ghost.danger{color:var(--bad)}
+@media (hover:hover){.btn-ghost.danger:hover{background:var(--bad-soft)}}
+.bars{display:flex;align-items:flex-end;gap:3px;height:140px}
+.bar{flex:1 1 0;height:100%;display:flex;align-items:flex-end;min-width:0}
+.bar span{display:block;width:100%;min-height:2px;border-radius:3px 3px 0 0;background:var(--accent)}

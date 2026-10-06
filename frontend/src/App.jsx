@@ -11,6 +11,7 @@ import Timetable from "./pages/Timetable";
 import Cards from "./pages/Cards";
 import Reports, { CourseReport } from "./pages/Reports";
 import Settings from "./pages/Settings";
+import Platform from "./pages/Platform";
 import "./theme.css";
 
 function Protected({ children }) {
@@ -41,6 +42,8 @@ export default function App() {
             <Route path="/reports/:id" element={<CourseReport />} />
             <Route path="/settings"    element={<Navigate to="/settings/profile" replace />} />
             <Route path="/settings/:tab" element={<Settings />} />
+            <Route path="/platform"      element={<Platform />} />
+            <Route path="/platform/:tab" element={<Platform />} />
             <Route path="/profile"     element={<Navigate to="/settings/profile" replace />} />
 
             {/* Old addresses, kept so bookmarks still land somewhere useful. */}

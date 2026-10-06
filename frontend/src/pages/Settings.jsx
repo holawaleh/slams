@@ -296,7 +296,7 @@ function AddStaff({ myRole, onClose, onDone }) {
   );
 }
 
-function ResetPassword({ member, onClose, onDone }) {
+export function ResetPassword({ member, onClose, onDone, url }) {
   const [password, setPassword] = useState(tempPassword());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -306,7 +306,7 @@ function ResetPassword({ member, onClose, onDone }) {
     setBusy(true);
     setError(null);
     try {
-      await api.post(`/api/members/${member.id}/set_password/`, { password });
+      await api.post(url || `/api/members/${member.id}/set_password/`, { password });
       setDone(true);
     } catch (err) {
       setError(err);

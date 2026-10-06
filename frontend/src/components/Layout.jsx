@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import api from "../lib/api";
 import ThemeToggle from "./ThemeToggle";
 import { onInstallAvailable, promptInstall } from "../lib/platform";
 import "./Layout.css";
@@ -14,6 +13,7 @@ const NAV = [
   { to: "/timetable",  label: "Timetable", icon: "clock" },
   { to: "/reports",    label: "Reports",   icon: "chart" },
   { to: "/settings",   label: "Settings",  icon: "gear" },
+  { to: "/platform",   label: "Platform admin", icon: "shield", platform: true },
 ];
 
 export function Icon({ name, size = 18 }) {
@@ -32,6 +32,7 @@ export function Icon({ name, size = 18 }) {
     gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></>,
     logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>,
     user: <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
+    shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
     pin: <><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z" /></>,
   };
   return <svg {...common}>{paths[name]}</svg>;
@@ -77,7 +78,7 @@ export default function Layout() {
     try { localStorage.setItem("sidebarPinned", next ? "1" : "0"); } catch { /* optional */ }
   }
 
-  const items = NAV.filter((n) => !n.admin || isAdmin);
+  const items = NAV.filter((n) => (!n.admin || isAdmin) && (!n.platform || isPlatformAdmin));
   const role = isPlatformAdmin ? "platform admin" : org?.role;
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username;
 
@@ -191,10 +192,9 @@ export default function Layout() {
                     </>
                   )}
                   {isPlatformAdmin && (
-                    <a className="menu-item" target="_blank" rel="noreferrer"
-                       href={`${api.defaults.baseURL}/admin/`}>
-                      All users &amp; data (Django admin)
-                    </a>
+                    <button className="menu-item" onClick={() => navigate("/platform")}>
+                      Platform admin
+                    </button>
                   )}
                   <div className="menu-sep" />
                   <button className="menu-item danger" onClick={logout}>
