@@ -169,7 +169,7 @@ function SchoolDetail({ id, onClose, onChanged }) {
                 <input id="sc" className="input" value={form.country} onChange={set("country")} /></div>
               <div className="field"><label htmlFor="sz">Time zone</label>
                 <input id="sz" className="input" value={form.timezone} onChange={set("timezone")} /></div>
-              <div className="field"><label htmlFor="st">Current term</label>
+              <div className="field"><label htmlFor="st">Current Session/Semester</label>
                 <input id="st" className="input" maxLength={16} value={form.term} onChange={set("term")} /></div>
               <div className="field"><label htmlFor="sd">Reader limit</label>
                 <input id="sd" className="input" type="number" min={0} value={form.max_devices}

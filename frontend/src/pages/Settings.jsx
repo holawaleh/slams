@@ -532,10 +532,10 @@ function Organisation() {
         </div>
         <div className="form-2">
           <div className="field">
-            <label htmlFor="oterm">Current term</label>
+            <label htmlFor="oterm">Current Session/Semester</label>
             <input id="oterm" className="input" value={form.term} maxLength={16} onChange={set("term")} />
             <small className="faint" style={{ display: "block", marginTop: 6 }}>
-              Enrolment and the timetable are kept per term.
+              Enrolment and the timetable are kept per session/semester.
             </small>
           </div>
           <div className="field">
